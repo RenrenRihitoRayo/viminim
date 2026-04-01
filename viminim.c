@@ -1,12 +1,8 @@
 #include <ncurses.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdbool.h>
-#include <ctype.h>
-
 #include "vcommons.h"
 #include "parsers/c.c"
 #include "parsers/mila.c"
+#include "viminim/commands.c"
 
 HLList hl_list[] = {
     {"c", (char*[]){"c", "h", "i", NULL}, highlight_c_line},
@@ -14,7 +10,7 @@ HLList hl_list[] = {
     {NULL, NULL, NULL}
 };
 
-SyntaxHL find_syntax_w_name(char* name) {
+SyntaxHL find_syntax_w_name(const char* name) {
     for (int t=0; hl_list[t].name; ++t) {
         if (strcmp(name, hl_list[t].name) == 0) {
             return hl_list[t].hltr;
@@ -23,7 +19,7 @@ SyntaxHL find_syntax_w_name(char* name) {
     return NULL;
 }
 
-SyntaxHL find_syntax_w_ext(char* name) {
+SyntaxHL find_syntax_w_ext(const char* name) {
     for (int t=0; hl_list[t].name; ++t) {
         for (int j=0; hl_list[t].extensions[j]; ++j) {
             if (strcmp(name, hl_list[t].extensions[j]) == 0) {
@@ -34,9 +30,9 @@ SyntaxHL find_syntax_w_ext(char* name) {
     return NULL;
 }
 
-static void rehighlight(Buffer *b)
+void rehighlight(Buffer *b)
 {
-    if ((!b->syntax) && !b->hltr) return;
+    if (!b->hltr) return;
     if (!b->colors)      b->colors      = calloc(b->capacity, sizeof(ColorSpan *));
     if (!b->line_states) b->line_states = calloc(b->capacity, sizeof(HLState));
 
@@ -48,7 +44,7 @@ static void rehighlight(Buffer *b)
     }
 }
 
-static void rehighlight_from(Buffer *b, size_t row)
+void rehighlight_from(Buffer *b, size_t row)
 {
     if (!b->syntax || strcmp(b->syntax, "c") != 0) return;
     if (!b->colors)      b->colors      = calloc(b->capacity, sizeof(ColorSpan *));
@@ -81,13 +77,27 @@ void move_cursor_to(Editor *e, size_t new_cy, size_t new_cx)
     int max_cols = COLS;
     int lnw = e->show_line_numbers ? e->num_padding : 0;
 
-    if (e->cy < e->scroll_y) e->scroll_y = e->cy;
-    else if (e->cy >= e->scroll_y + (size_t)max_rows)
+    if (e->cy < e->scroll_y) {
+        e->scroll_y = e->cy;
+        clear();
+        draw(e);
+    }
+    else if (e->cy >= e->scroll_y + (size_t)max_rows) {
         e->scroll_y = e->cy - max_rows + 1;
+        clear();
+        draw(e);
+    }
 
-    if (e->cx < e->scroll_x) e->scroll_x = e->cx;
-    else if (e->cx >= e->scroll_x + (size_t)(max_cols - lnw))
+    if (e->cx < e->scroll_x) {
+        e->scroll_x = e->cx;
+        clear();
+        draw(e);
+    }
+    else if (e->cx >= e->scroll_x + (size_t)(max_cols - lnw)) {
         e->scroll_x = e->cx - (max_cols - lnw) + 1;
+        clear();
+        draw(e);
+    }
 }
 
 Buffer *buffer_create(const char *name)
@@ -204,7 +214,7 @@ void insert_char(Editor *e, char c)
         b->colors[b->line_count]      = NULL;
         b->line_states[b->line_count] = HL_STATE_NORMAL;
         b->line_count++;
-        rehighlight_from(b, e->cy);
+        rehighlight_from(b, e->cy-1);
     } else {
         size_t len = strlen(b->lines[e->cy]);
         b->lines[e->cy] = realloc(b->lines[e->cy], len + 2);
@@ -215,6 +225,15 @@ void insert_char(Editor *e, char c)
 
     b->changed = true;
     move_cursor_to(e, e->cy, e->cx + 1);
+}
+
+void insert_string(Editor* e, char* string) {
+    while (*string)
+    {
+        if (*string == 10) insert_newline(e);
+        else               insert_char(e, *string);
+        string++;
+    }
 }
 
 void insert_newline(Editor *e)
@@ -238,6 +257,8 @@ void insert_newline(Editor *e)
         b->line_count++;
         move_cursor_to(e, e->cy + 1, 0);
         b->changed = true;
+        clear();
+        draw(e);
         return;
     }
 
@@ -260,6 +281,8 @@ void insert_newline(Editor *e)
     rehighlight(b);
     move_cursor_to(e, e->cy + 1, 0);
     b->changed = true;
+    clear();
+    draw(e);
 }
 
 void backspace_char(Editor *e)
@@ -273,8 +296,8 @@ void backspace_char(Editor *e)
                 b->lines[e->cy] + e->cx,
                 len - e->cx + 1);
         e->cx--;
-        rehighlight_from(b, e->cy);
         b->changed = true;
+        rehighlight_from(b, e->cy);
     } else if (e->cy > 0) {
         size_t prev_len = strlen(b->lines[e->cy - 1]);
         size_t curr_len = strlen(b->lines[e->cy]);
@@ -295,9 +318,10 @@ void backspace_char(Editor *e)
         b->line_states[b->line_count - 1] = HL_STATE_NORMAL;
         b->line_count--;
 
+        clear(); draw(e);
+
         e->cy--;
         e->cx = prev_len;
-        rehighlight_from(b, e->cy);
         b->changed = true;
     }
 }
@@ -338,7 +362,6 @@ void draw_line_with_highlights(int y, char *line, ColorSpan *spans,
 
 void draw(Editor *e)
 {
-    clear();
     Buffer *b = e->buffers[e->current];
 
     int max_rows = LINES - 1;
@@ -348,13 +371,13 @@ void draw(Editor *e)
     else if (e->cy >= e->scroll_y + (size_t)max_rows)
         e->scroll_y = e->cy - max_rows + 1;
 
-    int line_num_width = e->show_line_numbers ? 5 : 0;
+    int num_len = snprintf(NULL, 0, "%zu", b->line_count) + 1;
+    e->num_padding = num_len;
+
+    int line_num_width = e->show_line_numbers ? num_len : 0;
     if (e->cx < e->scroll_x) e->scroll_x = e->cx;
     else if (e->cx >= e->scroll_x + (size_t)(max_cols - line_num_width))
         e->scroll_x = e->cx - (max_cols - line_num_width) + 1;
-
-    int num_len = snprintf(NULL, 0, "%zu", b->line_count) + 1;
-    e->num_padding = num_len;
 
     for (size_t i = 0; i < b->line_count; i++) {
         if ((int)i < (int)e->scroll_y) continue;
@@ -365,16 +388,20 @@ void draw(Editor *e)
         if (e->show_line_numbers)
             mvprintw(screen_y, 0, "%*zu ", num_len, i + 1);
 
+        if (i == e->cy) clrtoeol();
         draw_line_with_highlights(screen_y, b->lines[i],
                                   b->colors ? b->colors[i] : NULL,
                                   max_cols, e->scroll_x, x_start);
     }
 
     for (int i = (int)(b->line_count - e->scroll_y); i < max_rows; i++)
-        mvprintw(i, 0, "%*s", num_len, "~");
+        mvprintw(i, 0, "~%*s", num_len, "");
 
+
+    move(LINES-1, 0); clrtoeol();
     if (e->mode == COMMAND)
     {
+        move(LINES-2, 0); clrtoeol();
         int chars = snprintf(NULL, 0, "[%s MODE] Buffer: %s (%zu lines)",
                              e->mode == INSERT ? "INSERT" : "NORMAL",
                              b->name, b->line_count);
@@ -384,7 +411,9 @@ void draw(Editor *e)
                  b->name, b->line_count,
                  COLS - (chars + offset), b->syntax ? b->syntax : "???",
                  e->cy + 1, e->cx);
-        mvprintw(LINES - 1, 0, ":%s⟨", e->command);
+        mvprintw(LINES - 1, 0, ":%s", e->command);
+        refresh();
+        return;
     }
     else {
         int chars = snprintf(NULL, 0, "[%s MODE] Buffer: %s (%zu lines)",
@@ -397,8 +426,8 @@ void draw(Editor *e)
                  COLS - (chars + offset), b->syntax ? b->syntax : "???",
                  e->cy + 1, e->cx);
     }
-
-    move((int)(e->cy - e->scroll_y), (int)(e->cx - e->scroll_x) + e->num_padding + 1);
+    if (!e->show_line_numbers) line_num_width--;
+    move((int)(e->cy - e->scroll_y), (int)(e->cx - e->scroll_x) + line_num_width + 1);
     refresh();
 }
 
@@ -421,14 +450,43 @@ void handle_command(Editor *e)
     size_t len = strlen(cmd);
     if (len > 0 && cmd[len - 1] == '!') { force = true; cmd[len - 1] = '\0'; }
 
+    Command* command = parse_command(e->command);
+
+    if (strcmp(command->command[0], "w") == 0) {
+        if (command->argc == 1) save_buffer(b);
+        else if (command->argc == 2) {
+             b->name = strdup(command->command[1]);
+             save_buffer(b);
+        }
+    } else if (strcmp(command->command[0], "q") == 0 && command->argc == 1) {
+        endwin();
+        exit(0);
+    }
+
+    e->cmd_len = 0;
+    e->command[0] = '\0';
+    e->mode = NORMAL;
+    free_command(command);
+    return;
+
     if (strcmp(cmd, "w") == 0)
         save_buffer(b);
     else if (strcmp(cmd, "q") == 0 && (!b->changed || force))
         endwin(), exit(0);
     else if (strcmp(cmd, "wq") == 0)
         save_buffer(b), endwin(), exit(0);
-    else if (strncmp(cmd, "l ", 2) == 0)
-        move_cursor_to(e, atoi(cmd + 2), 0);
+    else if (strncmp(cmd, "l ", 2) == 0) {
+        int line = 0;
+        if (strcmp(cmd+2, "end") == 0)
+            line = b->line_count-1;
+        else if (strcmp(cmd+2, "begin") == 0)
+            line = 0;
+        else
+            line = atoi(cmd + 2)-1;
+        if (line < 0) line = 0;
+        else if (line > b->line_count) line = b->line_count-1;
+        move_cursor_to(e, line, 0);
+    }
     else if (strncmp(cmd, "syn ", 4) == 0) {
         free(b->syntax);
         const char *arg = cmd + 4;
@@ -456,41 +514,53 @@ void handle_command(Editor *e)
 
 void handle_input(Editor *e, int ch)
 {
-    if (e->mode == NORMAL) {
-        switch (ch) {
-        case 'i': e->mode = INSERT; break;
-        case 'h': move_cursor_to(e, e->cy, e->cx > 0 ? e->cx - 1 : 0); break;
-        case 'l': move_cursor_to(e, e->cy, e->cx + 1); break;
-        case 'j': move_cursor_to(e, e->cy + 1, e->cx); break;
-        case 'k': move_cursor_to(e, e->cy > 0 ? e->cy - 1 : 0, e->cx); break;
-        case 'n': e->show_line_numbers = !e->show_line_numbers; break;
-        case ':':
-            e->mode = COMMAND;
-            e->cmd_len = 0;
-            e->command[0] = '\0';
-            break;
-        }
-    } else if (e->mode == INSERT) {
-        if      (ch == 27)                         e->mode = NORMAL;
-        else if (ch == 10 || ch == KEY_ENTER)      insert_newline(e);
-        else if (ch == 127 || ch == KEY_BACKSPACE) backspace_char(e);
-        else                                       insert_char(e, ch);
-    } else if (e->mode == COMMAND) {
-        if (ch == 10 || ch == KEY_ENTER)
-            handle_command(e);
-        else if (ch == 27) {
-            e->mode = NORMAL;
-            e->cmd_len = 0;
-            e->command[0] = '\0';
-        } else if (ch == 127 || ch == KEY_BACKSPACE) {
-            if (e->cmd_len > 0) e->command[--e->cmd_len] = '\0';
-            else {
+    switch (ch) {
+        case KEY_LEFT: move_cursor_to(e, e->cy, e->cx > 0 ? e->cx - 1 : 0); break;
+        case KEY_RIGHT: move_cursor_to(e, e->cy, e->cx + 1); break;
+        case KEY_DOWN: move_cursor_to(e, e->cy + 1, e->cx); break;
+        case KEY_UP: move_cursor_to(e, e->cy > 0 ? e->cy - 1 : 0, e->cx); break;
+        case KEY_NPAGE: move_cursor_to(e, e->cy + LINES, e->cx); break;
+        case KEY_PPAGE: move_cursor_to(e, (ssize_t)(e->cy) - (ssize_t)(LINES) > 0 ? e->cy - LINES : 0, e->cx); break;
+        case KEY_HOME: move_cursor_to(e, e->cy, 0); break;
+        case KEY_END: move_cursor_to(e, e->cy, 9999); break;
+        default:
+        if (e->mode == NORMAL) {
+            switch (ch) {
+            case 'i': e->mode = INSERT; break;
+            case 'h': move_cursor_to(e, e->cy, e->cx > 0 ? e->cx - 1 : 0); break;
+            case 'l': move_cursor_to(e, e->cy, e->cx + 1); break;
+            case 'j': move_cursor_to(e, e->cy + 1, e->cx); break;
+            case 'k': move_cursor_to(e, e->cy > 0 ? e->cy - 1 : 0, e->cx); break;
+            case 'n': e->show_line_numbers = !e->show_line_numbers; break;
+            case ':':
+                e->mode = COMMAND;
+                e->cmd_len = 0;
                 e->command[0] = '\0';
-                e->mode = NORMAL;
+                break;
             }
-        } else if (e->cmd_len < sizeof(e->command) - 1) {
-            e->command[e->cmd_len++] = ch;
-            e->command[e->cmd_len]   = '\0';
+        } else if (e->mode == INSERT) {
+            if      (ch == 27)                         e->mode = NORMAL;
+            else if (ch == 10 || ch == KEY_ENTER)      insert_newline(e);
+            else if (ch == 127 || ch == KEY_BACKSPACE) backspace_char(e);
+            else if (ch == '\t')                       insert_string(e, "    ");
+            else                                       insert_char(e, ch);
+        } else if (e->mode == COMMAND) {
+            if (ch == 10 || ch == KEY_ENTER)
+                handle_command(e);
+            else if (ch == 27) {
+                e->mode = NORMAL;
+                e->cmd_len = 0;
+                e->command[0] = '\0';
+            } else if (ch == 127 || ch == KEY_BACKSPACE) {
+                if (e->cmd_len > 0) e->command[--e->cmd_len] = '\0';
+                else {
+                    e->command[0] = '\0';
+                    e->mode = NORMAL;
+                }
+            } else if (e->cmd_len < sizeof(e->command) - 1) {
+                e->command[e->cmd_len++] = ch;
+                e->command[e->cmd_len]   = '\0';
+            }
         }
     }
 }

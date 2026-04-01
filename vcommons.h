@@ -2,8 +2,15 @@
 
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
 
 typedef enum { NORMAL, INSERT, COMMAND } Mode;
+
+typedef struct {
+    char** command;
+    int argc;
+} Command;
 
 typedef enum {
     HL_STATE_NORMAL = 0,
@@ -51,3 +58,18 @@ typedef struct {
     char     command[256];
     size_t   cmd_len;
 } Editor;
+
+SyntaxHL find_syntax_w_name(const char* name);
+SyntaxHL find_syntax_w_ext(const char* name);
+void rehighlight(Buffer *b);
+void rehighlight_from(Buffer *b, size_t row);
+void move_cursor_to(Editor *e, size_t new_cy, size_t new_cx);
+void editor_add_buffer(Editor *e, Buffer *b);
+void insert_char(Editor *e, char c);
+void insert_newline(Editor *e);
+void backspace_char(Editor *e);
+void draw(Editor *e);
+void save_buffer(Buffer *b);
+void handle_command(Editor *e);
+void handle_input(Editor *e, int ch);
+int main(int argc, char *argv[]);
