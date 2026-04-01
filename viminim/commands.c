@@ -37,6 +37,7 @@ void free_command(Command* cmd)
 {
     for (int i=0; cmd->command[i]; ++i)
         free(cmd->command[i]);
+    free(cmd->command);
     free(cmd);
 }
 
@@ -126,9 +127,9 @@ Command *parse_command(const char *input)
         }
 
         // --- IDENTIFIER / WORD ---
-        if (isalpha(input[i]) || input[i] == '_') {
+        if (isalpha(input[i]) || input[i] == '_' || input[i] == '.' || input[i] == '/' || input[i] == '\\') {
             int start = i;
-            while (isalnum(input[i]) || input[i] == '_')
+            while (isalnum(input[i]) || input[i] == '_' || input[i] == '.' || input[i] == '/' || input[i] == '\\')
                 i++;
 
             push_token(&tokens, &count, &cap,
