@@ -40,6 +40,13 @@ SyntaxHL find_syntax_w_ext(const char *name)
     return NULL;
 }
 
+int has_changes(Editor* e)
+{
+    for (int i=0; i<e->count; ++i)
+        if (e->buffers[i]->changed) return 1;
+    return 0;
+}
+
 void rehighlight(Buffer *b)
 {
     if (!b->hltr)
@@ -122,7 +129,7 @@ void move_cursor_to(Editor *e, size_t new_cy, size_t new_cx)
     }
     else if (e->cx >= e->scroll_x + (size_t)(max_cols - lnw))
     {
-        e->scroll_x = e->cx - (max_cols - lnw) + 1;
+        e->scroll_x = e->cx - (max_cols - lnw) + 2;
         erase();
         draw(e);
     }
@@ -141,6 +148,7 @@ Buffer *buffer_create(const char *name)
     b->lines[0] = strdup("");
     b->line_count = 1;
     b->hltr = NULL;
+    b->editor = NULL;
     return b;
 }
 
@@ -221,14 +229,16 @@ Buffer *create_file_buffer(const char *filename)
     return b;
 }
 
-void editor_add_buffer(Editor *e, Buffer *b)
+int editor_add_buffer(Editor *e, Buffer *b)
 {
     if (e->count >= e->capacity)
     {
         e->capacity *= 2;
         e->buffers = realloc(e->buffers, sizeof(Buffer *) * e->capacity);
     }
+    b->editor = e;
     e->buffers[e->count++] = b;
+    return e->count-1;
 }
 
 void insert_char(Editor *e, char c)
@@ -557,18 +567,17 @@ void draw(Editor *e)
         // Show command mode in status bar
         move(LINES - 2, 0);
         clrtoeol();
-        int chars = snprintf(NULL, 0, "[%s MODE] Buffer: %s (%zu lines)",
+        int chars = snprintf(NULL, 0, "%s '%s' %zuL",
                              e->mode == INSERT ? "INSERT" : "NORMAL",
                              b->name, b->line_count);
-        int offset = snprintf(NULL, 0, "%s %zu, %zu    ",
+        int offset = snprintf(NULL, 0, "%s %zu, %zu  ",
                               b->syntax ? b->syntax : "???", e->cy + 1, e->cx);
-        mvprintw(LINES - 2, 0, "[%s MODE] Buffer: %s (%zu lines)%*s %zu, %zi",
+        mvprintw(LINES - 2, 0, "%s '%s' %zuL%*s %zu, %zi",
                  e->mode == INSERT ? "INSERT" : "NORMAL",
                  b->name, b->line_count,
                  COLS - (chars + offset), b->syntax ? b->syntax : "???",
                  e->cy + 1, e->cx);
         mvprintw(LINES - 1, 0, ":%s", e->command);
-        refresh();
         return;
     }
     else if (e->mode == SEARCH)
@@ -576,12 +585,12 @@ void draw(Editor *e)
         // Show search mode in status bar
         move(LINES - 2, 0);
         clrtoeol();
-        int chars = snprintf(NULL, 0, "[%s MODE] Buffer: %s (%zu lines)",
+        int chars = snprintf(NULL, 0, "[%s] Buffer: %s%zu lines)",
                              "SEARCH",
                              b->name, b->line_count);
-        int offset = snprintf(NULL, 0, "%s %zu, %zu    ",
+        int offset = snprintf(NULL, 0, "%s %zu, %zu  ",
                               b->syntax ? b->syntax : "???", e->cy + 1, e->cx);
-        mvprintw(LINES - 2, 0, "[%s MODE] Buffer: %s (%zu lines)%*s %zu, %zi",
+        mvprintw(LINES - 2, 0, "[%s] Buffer: %s (%zu lines)%*s %zu, %zi",
                  "SEARCH",
                  b->name, b->line_count,
                  COLS - (chars + offset), b->syntax ? b->syntax : "???",
@@ -600,14 +609,14 @@ void draw(Editor *e)
         // Show search mode in status bar
         move(LINES - 2, 0);
         clrtoeol();
-        int chars = snprintf(NULL, 0, "[%s MODE] Buffer: %s (%zu lines)",
+        int chars = snprintf(NULL, 0, "%s '%s'",
                              "BUFFER",
-                             b->name, b->line_count);
-        int offset = snprintf(NULL, 0, "%s %zu, %zu    ",
+                             b->name);
+        int offset = snprintf(NULL, 0, "%s %zu, %zu  ",
                               b->syntax ? b->syntax : "???", e->cy + 1, e->cx);
-        mvprintw(LINES - 2, 0, "[%s MODE] Buffer: %s (%zu lines)%*s %zu, %zi",
+        mvprintw(LINES - 2, 0, "%s '%s'%*s %zu, %zi",
                  "BUFFER",
-                 b->name, b->line_count,
+                 b->name,
                  COLS - (chars + offset), b->syntax ? b->syntax : "???",
                  e->cy + 1, e->cx);
 
@@ -621,12 +630,12 @@ void draw(Editor *e)
     else
     {
         // Normal mode status bar
-        int chars = snprintf(NULL, 0, "[%s MODE] Buffer: %s (%zu lines)",
+        int chars = snprintf(NULL, 0, "%s '%s' %zuL",
                              e->mode == INSERT ? "INSERT" : "NORMAL",
                              b->name, b->line_count);
-        int offset = snprintf(NULL, 0, "%s %zu, %zu    ",
+        int offset = snprintf(NULL, 0, "%s %zu, %zu  ",
                               b->syntax ? b->syntax : "???", e->cy + 1, e->cx);
-        mvprintw(LINES - 1, 0, "[%s MODE] Buffer: %s (%zu lines)%*s %zu, %zi",
+        mvprintw(LINES - 1, 0, "%s '%s' %zuL%*s %zu, %zi",
                  e->mode == INSERT ? "INSERT" : "NORMAL",
                  b->name, b->line_count,
                  COLS - (chars + offset), b->syntax ? b->syntax : "???",
@@ -672,13 +681,20 @@ void save_buffer(Buffer *b)
 {
     if ((!b->name) || (!strlen(b->name)))
     {
+        push_message_log(b->editor, "Buffer Unnamed!", ERROR);
         return;
     }
     FILE *f = fopen(b->name, "w");
     if (!f)
         return;
+    size_t count = 0;
     for (size_t i = 0; i < b->line_count; i++)
-        fprintf(f, "%s\n", b->lines[i]);
+        count += fprintf(f, "%s\n", b->lines[i]);
+    int size = snprintf(NULL, 0, "Wrote %zu bytes", count);
+    char* str = (char*)malloc(sizeof(char)*size+1);
+    sprintf(str, "Wrote %zu bytes", count);
+    push_message(b->editor, str);
+    free(str);
     fclose(f);
     b->changed = false;
 }
@@ -1094,7 +1110,7 @@ void handle_command(Editor *e)
     }
     else if (strcmp(command[0], "q") == 0 && argc == 1)
     {
-        if (force || !b->changed)
+        if (force || !has_changes(e))
         {
             endwin();
             exit(0);
@@ -1127,7 +1143,7 @@ void handle_command(Editor *e)
             }
         }
     }
-    else if (strcmp(command[0], "l") == 0 && argc == 2)
+    else if ((strcmp(command[0], "l") == 0 || strcmp(command[0], "line") == 0) && argc == 2)
     {
         int line = 0;
         if (strcmp(command[1], "end") == 0)
@@ -1150,10 +1166,16 @@ void handle_command(Editor *e)
     {
         strcpy(e->search.pattern, command[1]);
     }
-    else if (strcmp(command[0], "new") == 0 && argc == 2)
+    else if (strcmp(command[0], "new") == 0)
     {
-        Buffer *b = create_file_buffer("");
-        editor_add_buffer(e, b);
+        Buffer *b = create_file_buffer(argc == 2 ? command[1] : "");
+        int id = editor_add_buffer(e, b);
+        e->current = id;
+    }
+    else if (strcmp(command[0], "name") == 0 && argc == 2)
+    {
+        if (b->name) free(b->name);
+        b->name = strdup(command[1]);
     }
     else if (strcmp(command[0], "msg") == 0 && argc == 2)
     {
@@ -1185,15 +1207,25 @@ void handle_buffer_switch(Editor *e)
     Buffer *b = e->buffers[e->current];
     char buffer[256];
     strcpy(buffer, e->command);
+    int id = -1;
+
+    if (buffer[0] == ',') id = atoi(buffer+1);
+    if (id != -1 && id < e->count) {
+        e->current = id;
+        return;
+    }
 
     for (size_t buf = 0; buf < e->count; ++buf)
     {
         if (strcmp(buffer, e->buffers[buf]->name) == 0)
         {
             e->current = buf;
+            goto clean;
         }
     }
 
+    push_message_log(e, "No such buffer found", WARNING);
+clean:;
     e->cmd_len = 0;
     e->command[0] = '\0';
     e->mode = NORMAL;
@@ -1425,20 +1457,26 @@ int main(int argc, char *argv[])
 
     start_color();
     use_default_colors();
-    init_pair(1, COLOR_BLUE, COLOR_BLACK);
-    init_pair(2, COLOR_RED, COLOR_BLACK);
-    init_pair(3, COLOR_GREEN, COLOR_BLACK);
-    init_pair(4, COLOR_CYAN, COLOR_BLACK);
-    init_pair(5, COLOR_YELLOW, COLOR_BLACK);
-    init_pair(6, COLOR_MAGENTA, COLOR_BLACK);
+    init_color(9, 90, 90, 90);
+    init_pair(9, -1, 9);
+    bkgdset(COLOR_PAIR(9));
+    init_pair(1, COLOR_BLUE, 9);
+    init_color(COLOR_RED, 1000, 400, 300);
+    init_pair(2, COLOR_RED, 9);
+    init_pair(3, COLOR_GREEN, 9);
+    init_pair(4, COLOR_CYAN, 9);
+    init_pair(5, COLOR_YELLOW, 9);
+    init_pair(6, COLOR_MAGENTA, 9);
     init_pair(7, COLOR_BLACK, COLOR_RED);
     init_color(8, 100, 602, 602);
-    init_pair(8, 8, -1);
-
+    init_pair(8, 8, 9);
     Editor *ed = editor_create();
-    const char *filename = argc > 1 ? argv[1] : "meep.txt";
-    editor_add_buffer(ed, create_file_buffer(filename));
-
+    for (int i=1; i<argc; ++i)
+        editor_add_buffer(ed, create_file_buffer(argv[i]));
+    if (argc == 1) {
+        editor_add_buffer(ed, create_file_buffer("temp"));
+    }
+    erase();
     int ch;
     while (1)
     {

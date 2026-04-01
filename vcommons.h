@@ -67,6 +67,7 @@ typedef struct {
     SyntaxHL hltr;
 } HLList;
 
+typedef struct Editor Editor;
 typedef struct {
     char      **lines;
     ColorSpan **colors;
@@ -77,6 +78,7 @@ typedef struct {
     size_t      capacity;
     char       *name;
     bool        changed;
+    Editor*     editor;
 } Buffer;
 
 // Value corresponds to color pair
@@ -92,7 +94,7 @@ typedef struct {
     MessageSeverity level;
 } Message;
 
-typedef struct {
+struct Editor {
     Buffer **buffers;
     size_t   count;
     size_t   capacity;
@@ -107,14 +109,14 @@ typedef struct {
     SearchState search;
     Message message[100];
     size_t message_ptr;
-} Editor;
+};
 
 SyntaxHL find_syntax_w_name(const char* name);
 SyntaxHL find_syntax_w_ext(const char* name);
 void rehighlight(Buffer *b);
 void rehighlight_from(Buffer *b, size_t row);
 void move_cursor_to(Editor *e, size_t new_cy, size_t new_cx);
-void editor_add_buffer(Editor *e, Buffer *b);
+int editor_add_buffer(Editor *e, Buffer *b);
 void insert_char(Editor *e, char c);
 void insert_newline(Editor *e);
 void backspace_char(Editor *e);
