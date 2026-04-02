@@ -95,20 +95,34 @@ typedef struct {
 } Message;
 
 struct Editor {
+    // Buffers
     Buffer **buffers;
     size_t   count;
     size_t   capacity;
     size_t   current;
+    
+    // Logic
     size_t   cx, cy;
     size_t   scroll_x, scroll_y, num_padding;
+    
+    // Editing
     Mode     mode;
     bool     show_line_numbers;
     int      wrap_width;
-    char     command[256];
+    
+    // commands
+    char     command[1024];
     size_t   cmd_len;
-    SearchState search;
-    Message message[100];
-    size_t message_ptr;
+    
+    // messages
+    Message  message[100];
+    size_t   message_ptr;
+    
+    // search
+    size_t  *matched_lines;
+    size_t   matches;
+    size_t   cur_match;
+    bool     search_d;
 };
 
 SyntaxHL find_syntax_w_name(const char* name);

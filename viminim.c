@@ -5,6 +5,7 @@
 #include "vcommons.h"
 #include "parsers/c.c"
 #include "parsers/mila.c"
+#include "viminim/search.c"
 #include "viminim/commands.c"
 
 HLList hl_list[] = {
@@ -40,10 +41,11 @@ SyntaxHL find_syntax_w_ext(const char *name)
     return NULL;
 }
 
-int has_changes(Editor* e)
+int has_changes(Editor *e)
 {
-    for (int i=0; i<e->count; ++i)
-        if (e->buffers[i]->changed) return 1;
+    for (int i = 0; i < e->count; ++i)
+        if (e->buffers[i]->changed)
+            return 1;
     return 0;
 }
 
@@ -129,7 +131,7 @@ void move_cursor_to(Editor *e, size_t new_cy, size_t new_cx)
     }
     else if (e->cx >= e->scroll_x + (size_t)(max_cols - lnw))
     {
-        e->scroll_x = e->cx - (max_cols - lnw) + 2;
+        e->scroll_x = e->cx - (max_cols - lnw) + 1 + 2;
         erase();
         draw(e);
     }
@@ -169,6 +171,9 @@ Editor *editor_create()
     e->command[0] = '\0';
     memset(e->message, 0, sizeof(e->message));
     e->message_ptr = 0;
+    e->matched_lines = NULL;
+    e->cur_match = 0;
+    e->search_d = 0; //forward
     return e;
 }
 
@@ -238,7 +243,7 @@ int editor_add_buffer(Editor *e, Buffer *b)
     }
     b->editor = e;
     e->buffers[e->count++] = b;
-    return e->count-1;
+    return e->count - 1;
 }
 
 void insert_char(Editor *e, char c)
@@ -564,7 +569,6 @@ void draw(Editor *e)
 
     if (e->mode == COMMAND)
     {
-        // Show command mode in status bar
         move(LINES - 2, 0);
         clrtoeol();
         int chars = snprintf(NULL, 0, "%s '%s' %zuL",
@@ -582,15 +586,14 @@ void draw(Editor *e)
     }
     else if (e->mode == SEARCH)
     {
-        // Show search mode in status bar
         move(LINES - 2, 0);
         clrtoeol();
-        int chars = snprintf(NULL, 0, "[%s] Buffer: %s%zu lines)",
+        int chars = snprintf(NULL, 0, "[%s] %sv%zuL",
                              "SEARCH",
                              b->name, b->line_count);
         int offset = snprintf(NULL, 0, "%s %zu, %zu  ",
                               b->syntax ? b->syntax : "???", e->cy + 1, e->cx);
-        mvprintw(LINES - 2, 0, "[%s] Buffer: %s (%zu lines)%*s %zu, %zi",
+        mvprintw(LINES - 2, 0, "[%s] %s %zuL%*s %zu, %zi",
                  "SEARCH",
                  b->name, b->line_count,
                  COLS - (chars + offset), b->syntax ? b->syntax : "???",
@@ -599,14 +602,13 @@ void draw(Editor *e)
         // Show search direction and pattern
         char search_prompt[256];
         snprintf(search_prompt, sizeof(search_prompt), "%s%s",
-                 e->search.direction_forward ? "/" : "?", e->command);
+                 !e->search_d ? "/" : "?", e->command);
         mvprintw(LINES - 1, 0, "%s", search_prompt);
         refresh();
         return;
     }
     else if (e->mode == BUFFER_SWITCH)
     {
-        // Show search mode in status bar
         move(LINES - 2, 0);
         clrtoeol();
         int chars = snprintf(NULL, 0, "%s '%s'",
@@ -691,376 +693,12 @@ void save_buffer(Buffer *b)
     for (size_t i = 0; i < b->line_count; i++)
         count += fprintf(f, "%s\n", b->lines[i]);
     int size = snprintf(NULL, 0, "Wrote %zu bytes", count);
-    char* str = (char*)malloc(sizeof(char)*size+1);
+    char *str = (char *)malloc(sizeof(char) * size + 1);
     sprintf(str, "Wrote %zu bytes", count);
     push_message(b->editor, str);
     free(str);
     fclose(f);
     b->changed = false;
-}
-
-static size_t *find_in_line(const char *line, const char *pattern, size_t *out_count)
-{
-    if (!line || !pattern || *pattern == '\0')
-    {
-        *out_count = 0;
-        return NULL;
-    }
-
-    size_t pattern_len = strlen(pattern);
-    size_t line_len = strlen(line);
-    size_t capacity = 10;
-    size_t count = 0;
-    size_t *positions = malloc(capacity * sizeof(size_t));
-
-    if (!positions)
-        return NULL;
-
-    for (size_t i = 0; i <= line_len - pattern_len; i++)
-    {
-        if (strncmp(&line[i], pattern, pattern_len) == 0)
-        {
-            if (count >= capacity)
-            {
-                capacity *= 2;
-                size_t *temp = realloc(positions, capacity * sizeof(size_t));
-                if (!temp)
-                {
-                    free(positions);
-                    return NULL;
-                }
-                positions = temp;
-            }
-            positions[count++] = i;
-        }
-    }
-
-    *out_count = count;
-    if (count == 0)
-    {
-        free(positions);
-        return NULL;
-    }
-
-    return positions;
-}
-
-static size_t *find_in_line_icase(const char *line, const char *pattern, size_t *out_count)
-{
-    if (!line || !pattern || *pattern == '\0')
-    {
-        *out_count = 0;
-        return NULL;
-    }
-
-    size_t pattern_len = strlen(pattern);
-    size_t line_len = strlen(line);
-    size_t capacity = 10;
-    size_t count = 0;
-    size_t *positions = malloc(capacity * sizeof(size_t));
-
-    if (!positions)
-        return NULL;
-
-    char *lower_line = malloc(line_len + 1);
-    char *lower_pattern = malloc(pattern_len + 1);
-
-    if (!lower_line || !lower_pattern)
-    {
-        free(positions);
-        free(lower_line);
-        free(lower_pattern);
-        return NULL;
-    }
-
-    for (size_t i = 0; line[i]; i++)
-    {
-        lower_line[i] = tolower((unsigned char)line[i]);
-    }
-    lower_line[line_len] = '\0';
-
-    for (size_t i = 0; pattern[i]; i++)
-    {
-        lower_pattern[i] = tolower((unsigned char)pattern[i]);
-    }
-    lower_pattern[pattern_len] = '\0';
-
-    for (size_t i = 0; i <= line_len - pattern_len; i++)
-    {
-        if (strncmp(&lower_line[i], lower_pattern, pattern_len) == 0)
-        {
-            if (count >= capacity)
-            {
-                capacity *= 2;
-                size_t *temp = realloc(positions, capacity * sizeof(size_t));
-                if (!temp)
-                {
-                    free(positions);
-                    free(lower_line);
-                    free(lower_pattern);
-                    return NULL;
-                }
-                positions = temp;
-            }
-            positions[count++] = i;
-        }
-    }
-
-    free(lower_line);
-    free(lower_pattern);
-
-    *out_count = count;
-    if (count == 0)
-    {
-        free(positions);
-        return NULL;
-    }
-
-    return positions;
-}
-
-SearchResult *search_all_buffers(Editor *e, size_t *out_count)
-{
-    if (!e || !e->buffers || !e->search.pattern[0])
-    {
-        *out_count = 0;
-        return NULL;
-    }
-
-    SearchResultList results = {0};
-    results.capacity = 100;
-    results.results = malloc(results.capacity * sizeof(SearchResult));
-
-    if (!results.results)
-    {
-        *out_count = 0;
-        return NULL;
-    }
-
-    // Search through all buffers
-    for (size_t buf_idx = 0; buf_idx < e->count; buf_idx++)
-    {
-        Buffer *b = e->buffers[buf_idx];
-        if (!b || !b->lines)
-            continue;
-
-        // Search through all lines in buffer
-        for (size_t line_num = 0; line_num < b->line_count; line_num++)
-        {
-            size_t match_count = 0;
-            size_t *matches = find_in_line(b->lines[line_num], e->search.pattern, &match_count);
-
-            if (matches)
-            {
-                if (results.count >= results.capacity)
-                {
-                    results.capacity *= 2;
-                    SearchResult *temp = realloc(results.results, results.capacity * sizeof(SearchResult));
-                    if (!temp)
-                    {
-                        free(matches);
-                        goto cleanup;
-                    }
-                    results.results = temp;
-                }
-
-                results.results[results.count].line_num = line_num;
-                results.results[results.count].col_positions = matches;
-                results.results[results.count].match_count = match_count;
-                results.count++;
-            }
-        }
-    }
-
-    *out_count = results.count;
-    return results.results;
-
-cleanup:
-    for (size_t i = 0; i < results.count; i++)
-    {
-        free(results.results[i].col_positions);
-    }
-    free(results.results);
-    *out_count = 0;
-    return NULL;
-}
-
-SearchResult *search_buffer(Editor *e, Buffer *b, size_t *out_count)
-{
-    if (!e || !b || !b->lines || !e->search.pattern[0])
-    {
-        *out_count = 0;
-        return NULL;
-    }
-
-    SearchResultList results = {0};
-    results.capacity = 50;
-    results.results = malloc(results.capacity * sizeof(SearchResult));
-
-    if (!results.results)
-    {
-        *out_count = 0;
-        return NULL;
-    }
-
-    for (size_t line_num = 0; line_num < b->line_count; line_num++)
-    {
-        size_t match_count = 0;
-        size_t *matches = find_in_line(b->lines[line_num], e->search.pattern, &match_count);
-
-        if (matches)
-        {
-            if (results.count >= results.capacity)
-            {
-                results.capacity *= 2;
-                SearchResult *temp = realloc(results.results, results.capacity * sizeof(SearchResult));
-                if (!temp)
-                {
-                    free(matches);
-                    goto cleanup;
-                }
-                results.results = temp;
-            }
-
-            results.results[results.count].line_num = line_num;
-            results.results[results.count].col_positions = matches;
-            results.results[results.count].match_count = match_count;
-            results.count++;
-        }
-    }
-
-    *out_count = results.count;
-    return results.results;
-
-cleanup:
-    for (size_t i = 0; i < results.count; i++)
-    {
-        free(results.results[i].col_positions);
-    }
-    free(results.results);
-    *out_count = 0;
-    return NULL;
-}
-
-bool find_next(Editor *e, bool forward)
-{
-    if (!e || !e->buffers || !e->search.pattern[0])
-    {
-        e->search.found = false;
-        return false;
-    }
-
-    Buffer *b = e->buffers[e->current];
-    if (!b || !b->lines)
-    {
-        e->search.found = false;
-        return false;
-    }
-
-    size_t start_line = 0;
-    size_t start_col = b->line_count;
-
-    if (forward)
-    {
-        for (size_t line = start_line; line < b->line_count; line++)
-        {
-            size_t match_count = 0;
-            size_t *matches = find_in_line(b->lines[line], e->search.pattern, &match_count);
-
-            if (matches)
-            {
-                size_t col = 0;
-
-                if (line == start_line)
-                {
-                    for (size_t i = 0; i < match_count; i++)
-                    {
-                        if (matches[i] > start_col)
-                        {
-                            col = matches[i];
-                            break;
-                        }
-                    }
-                    if (col == 0 && line + 1 < b->line_count)
-                    {
-                        free(matches);
-                        continue;
-                    }
-                }
-                else
-                {
-                    col = matches[0];
-                }
-
-                e->search.last_found_line = line;
-                e->search.last_found_col = col;
-                e->search.found = true;
-                move_cursor_to(e, line, col);
-                free(matches);
-                return true;
-            }
-
-            free(matches);
-        }
-    }
-    else
-    {
-        for (size_t line = start_line + 1; line > 0; line--)
-        {
-            size_t line_idx = line - 1;
-            size_t match_count = 0;
-            size_t *matches = find_in_line(b->lines[line_idx], e->search.pattern, &match_count);
-
-            if (matches)
-            {
-                size_t col = 0;
-
-                if (line_idx == start_line)
-                {
-                    for (int i = (int)match_count - 1; i >= 0; i--)
-                    {
-                        if (matches[i] < start_col)
-                        {
-                            col = matches[i];
-                            break;
-                        }
-                    }
-                    if (col == 0 && line_idx > 0)
-                    {
-                        free(matches);
-                        continue;
-                    }
-                }
-                else
-                {
-                    col = matches[match_count - 1];
-                }
-
-                e->search.last_found_line = line_idx;
-                e->search.last_found_col = col;
-                e->search.found = true;
-                move_cursor_to(e, line_idx, col);
-                free(matches);
-                return true;
-            }
-
-            free(matches);
-        }
-    }
-
-    e->search.found = false;
-    return false;
-}
-
-void free_search_results(SearchResult *results, size_t count)
-{
-    if (!results)
-        return;
-    for (size_t i = 0; i < count; i++)
-    {
-        free(results[i].col_positions);
-    }
-    free(results);
 }
 
 void handle_command(Editor *e)
@@ -1162,10 +800,6 @@ void handle_command(Editor *e)
             line = b->line_count - 1;
         move_cursor_to(e, line, 0);
     }
-    else if (strcmp(command[0], "search") == 0 && argc == 2)
-    {
-        strcpy(e->search.pattern, command[1]);
-    }
     else if (strcmp(command[0], "new") == 0)
     {
         Buffer *b = create_file_buffer(argc == 2 ? command[1] : "");
@@ -1174,7 +808,8 @@ void handle_command(Editor *e)
     }
     else if (strcmp(command[0], "name") == 0 && argc == 2)
     {
-        if (b->name) free(b->name);
+        if (b->name)
+            free(b->name);
         b->name = strdup(command[1]);
     }
     else if (strcmp(command[0], "msg") == 0 && argc == 2)
@@ -1209,8 +844,10 @@ void handle_buffer_switch(Editor *e)
     strcpy(buffer, e->command);
     int id = -1;
 
-    if (buffer[0] == ',') id = atoi(buffer+1);
-    if (id != -1 && id < e->count) {
+    if (buffer[0] == ',')
+        id = atoi(buffer + 1);
+    if (id != -1 && id < e->count)
+    {
         e->current = id;
         return;
     }
@@ -1281,36 +918,54 @@ void handle_input(Editor *e, int ch)
                 move_cursor_to(e, e->cy > 0 ? e->cy - 1 : 0, e->cx);
                 break;
             // TODO: fix segfault!
-            // case '/':
-            //     // Forward search
-            //     e->mode = SEARCH;
-            //     e->search.direction_forward = true;
-            //     e->search.last_found_line = e->cy;
-            //     e->search.last_found_col = e->cx;
-            //     e->cmd_len = 0;
-            //     e->command[0] = '\0';
-            //     break;
-            // case '?':
-            //     // Backward search
-            //     e->mode = SEARCH;
-            //     e->search.direction_forward = false;
-            //     e->search.last_found_line = e->cy;
-            //     e->search.last_found_col = e->cx;
-            //     e->cmd_len = 0;
-            //     e->command[0] = '\0';
-            //     break;
-            // case 'N':
-            //     // Find previous match (opposite direction)
-            //     if (e->search.pattern[0] != '\0') {
-            //         find_next(e, !e->search.direction_forward);
-            //     }
-            //     break;
-            // case 'n':
-            //     // Find next match
-            //     if (e->search.pattern[0] != '\0') {
-            //         find_next(e, e->search.direction_forward);
-            //     }
-            //     break;
+            case '/':
+                // Forward search
+                e->mode = SEARCH;
+                e->search_d = false;
+                e->cmd_len = 0;
+                e->command[0] = '\0';
+                break;
+            case '?':
+                // Backward search
+                e->mode = SEARCH;
+                e->search_d = true;
+                e->cmd_len = 0;
+                e->command[0] = '\0';
+                break;
+            case 'N':
+                if (e->matched_lines && e->matches > 0)
+                {
+                    if (e->cur_match <= 0)
+                        e->cur_match = e->matches - 1;
+                    else
+                        e->cur_match--;
+
+                    e->cy = e->matched_lines[e->cur_match] - 1;
+                    move_cursor_to(e, e->cy, e->cx);
+                }
+                break;
+
+            case 'n':
+                if (e->matched_lines && e->matches > 0)
+                {
+                    if (e->cur_match >= e->matches - 1)
+                        e->cur_match = 0;
+                    else
+                        e->cur_match++;
+
+                    e->cy = e->matched_lines[e->cur_match] - 1;
+                    move_cursor_to(e, e->cy, e->cx);
+                }
+                break;
+            case 'Z':
+                erase();
+                for (int i = 0; e->matched_lines[i]; ++i)
+                {
+                    mvprintw(i + 1, 1, "%i", e->matched_lines[i] - 1);
+                }
+                refresh();
+                getch();
+                break;
             case ':':
                 e->mode = COMMAND;
                 e->cmd_len = 0;
@@ -1340,34 +995,24 @@ void handle_input(Editor *e, int ch)
         }
         else if (e->mode == SEARCH)
         {
-            // Handle search mode input
             if (ch == 10 || ch == KEY_ENTER)
             {
-                // Execute search on Enter
-                if (e->command[0] != '\0')
-                {
-                    strncpy(e->search.pattern, e->command, SEARCH_BUFFER_SIZE - 1);
-                    e->search.pattern[SEARCH_BUFFER_SIZE - 1] = '\0';
-
-                    // Find first match from current position
-                    e->search.last_found_line = e->cy;
-                    e->search.last_found_col = e->cx;
-                    find_next(e, e->search.direction_forward);
-                }
+                handle_search(e);
+                e->cy = e->matched_lines[e->cur_match] - 1;
+                move_cursor_to(e, e->cy, e->cx);
                 e->mode = NORMAL;
                 e->cmd_len = 0;
                 e->command[0] = '\0';
+                erase();
             }
             else if (ch == 27)
             {
-                // Cancel search on Escape
                 e->mode = NORMAL;
                 e->cmd_len = 0;
                 e->command[0] = '\0';
             }
             else if (ch == 127 || ch == KEY_BACKSPACE)
             {
-                // Backspace in search
                 if (e->cmd_len > 0)
                 {
                     e->command[--e->cmd_len] = '\0';
@@ -1380,7 +1025,6 @@ void handle_input(Editor *e, int ch)
             }
             else if (isprint(ch) && e->cmd_len < SEARCH_BUFFER_SIZE - 1)
             {
-                // Add character to search pattern
                 e->command[e->cmd_len++] = ch;
                 e->command[e->cmd_len] = '\0';
             }
@@ -1458,7 +1102,7 @@ int main(int argc, char *argv[])
     start_color();
     use_default_colors();
     init_color(9, 90, 90, 90);
-    init_pair(9, -1, 9);
+    init_pair(9, -1, -1);
     bkgdset(COLOR_PAIR(9));
     init_pair(1, COLOR_BLUE, 9);
     init_color(COLOR_RED, 1000, 400, 300);
@@ -1471,9 +1115,10 @@ int main(int argc, char *argv[])
     init_color(8, 100, 602, 602);
     init_pair(8, 8, 9);
     Editor *ed = editor_create();
-    for (int i=1; i<argc; ++i)
+    for (int i = 1; i < argc; ++i)
         editor_add_buffer(ed, create_file_buffer(argv[i]));
-    if (argc == 1) {
+    if (argc == 1)
+    {
         editor_add_buffer(ed, create_file_buffer("temp"));
     }
     erase();
