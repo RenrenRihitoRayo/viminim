@@ -119,7 +119,7 @@ Command *parse_command(const char *input)
         }
 
         // --- PUNCTUATION ---
-        if (strchr("(){}[]", input[i])) {
+        if (strchr("(){}", input[i])) {
             push_token(&tokens, &count, &cap,
                        substr(input, i, 1));
             i++;
@@ -127,9 +127,9 @@ Command *parse_command(const char *input)
         }
 
         // --- IDENTIFIER / WORD ---
-        if (isalpha(input[i]) || input[i] == '_' || input[i] == '.' || input[i] == '/' || input[i] == '\\') {
+        if (isalpha(input[i]) || strchr("\\/.[]", input[i])) {
             int start = i;
-            while (isalnum(input[i]) || input[i] == '_' || input[i] == '.' || input[i] == '/' || input[i] == '\\')
+            while (isalnum(input[i]) || strchr("\\/.[]", input[i]))
                 i++;
 
             push_token(&tokens, &count, &cap,

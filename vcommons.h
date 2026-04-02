@@ -1,5 +1,14 @@
 #pragma once
 
+// clangd is annoying
+#ifndef _Bool
+#define _Bool char
+#endif
+
+#include "mila/mila.h"
+Env* mila_globals;
+#include "viminim/event_handler.c"
+
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +22,14 @@
 #define SEARCH_BUFFER_SIZE 256
 
 typedef enum { NORMAL, INSERT, COMMAND, SEARCH, BUFFER_SWITCH } Mode;
+
+typedef enum {
+    ev_keypress,
+    ev_read,
+    ev_save,
+    ev_buffer_create,
+    ev_close_buffer,
+} Event;
 
 typedef enum {
     F_BLUE = 1,
@@ -132,6 +149,7 @@ struct Editor {
 
 Editor* editor = NULL;
 Env* mila_globals = NULL;
+EventHandler* event_handler = NULL;
 
 void buffer_free(Buffer* b);
 SyntaxHL find_syntax_w_name(const char* name);
@@ -156,6 +174,7 @@ void set_line(Buffer *b, size_t line_num, char* line);
 char* get_line(Buffer *b, size_t line_num);
 Buffer *create_file_buffer(const char *filename);
 void editor_command(Editor *e, char* cmd);
+char* linearize(char** lines, size_t count);
 
 char* home(const char *path) {
     if (!path || path[0] != '~') {

@@ -1,5 +1,6 @@
-#include "mila/mila.h"
 #include "vcommons.h"
+#include "mila/mila.h"
+#include <ncurses.h>
 
 typedef enum {
     CHANGED,
@@ -250,6 +251,29 @@ Value* native_command(Env* e, int argc, Value** argv)
     return vnull();
 }
 
+Value* native_get_whole_buffer(Env* e, int argc, Value** argv)
+{
+    if(argc != 2) return verror("get_whole_buffer(ed, cmd): Invalid number of arguments!");
+    Editor* ed = ((Editor*)argv[0]->v.opaque);
+    Buffer* b = ed->buffers[ed->current];
+    return vstring_take(linearize(b->lines, b->line_count));
+}
+
+Value* native_getch(Env* e, int argc, Value** argv)
+{
+    if(argc != 0) return verror("getch(): Invalid number of arguments!");
+    char text[2] = {getch(), 0};
+    return vstring_dup(text);
+}
+
+Value* native_catchch(Env* e, int argc, Value** argv)
+{
+    if(argc != 0) return verror("catchch(): Invalid number of arguments!");
+    char text[2] = {getch(), 0};
+    ungetch(text[0]);
+    return vstring_dup(text);
+}
+
 Value* native_type(Env* e, int argc, Value** argv)
 {
     // iterate args backwards
@@ -281,6 +305,13 @@ Value* native_type(Env* e, int argc, Value** argv)
 }
 
 
+Value* native_subscribe(Env* e, int argc, Value** argv)
+{
+    if(argc!=2) return verror("subscribe(id, fn): Invalid number of arguments!");
+    subscribe(event_handler, GET_INTEGER(argv[0]), argv[1]);
+    return vnull();
+}
+
 // Every function exposed to mila by vmm
 void register_editor_bindings(Env* e)
 {
@@ -311,6 +342,10 @@ void register_editor_bindings(Env* e)
     env_register_native(e, "update_screen", native_update_screen);
     env_register_native(e, "command", native_command);
     env_register_native(e, "type", native_type);
+    env_register_native(e, "get_whole_buffer", native_get_whole_buffer);
+    env_register_native(e, "getch", native_getch);
+    env_register_native(e, "catchch", native_catchch);
+    env_register_native(e, "subscribe", native_subscribe);
     
     // Values
     env_set_local_raw(e, "IMPORTANT_ERROR", vint(IMPORTANT_ERROR));
@@ -319,4 +354,11 @@ void register_editor_bindings(Env* e)
     env_set_local_raw(e, "INFO", vint(INFO));
     // == Status IDs
     env_set_local_raw(e, "STATUS_CHANGED", vint(CHANGED));
+    // == Events
+    env_set_local_raw(e, "EVENT_KEYPRESS", vint(ev_keypress));
+    env_set_local_raw(e, "EVENT_READ", vint(ev_read));
+    env_set_local_raw(e, "EVENT_SAVE", vint(ev_save));
+    env_set_local_raw(e, "EVENT_CREATE_BUFFER", vint(ev_buffer_create));
+    env_set_local_raw(e, "EVENT_CLOSE_BUFFER", vint(ev_close_buffer));
+
 }

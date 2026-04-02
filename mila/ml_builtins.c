@@ -297,7 +297,7 @@ Value *native_input(Env *env, int argc, Value **argv)
     else if (argc == 0)
         return vnull();
     else
-        return verror("input(prompt): Expected 1 argument (prompt) string.\n");
+        return verror("input(prompt): Expected 1 argument (prompt) string.");
 
     char *res = read_input();
     return res ? vstring_take(res) : vnull();
@@ -444,7 +444,7 @@ Value *native_cast_int(Env *env, int argc, Value **argv)
     }
     else
     {
-        return verror("cast.int(str): Expected 1 argument (str) string.\n");
+        return verror("cast.int(str): Expected 1 argument (str) string.");
         i = 0;
     }
     return vint(i);
@@ -471,7 +471,7 @@ Value *native_cast_float(Env *env, int argc, Value **argv)
     }
     else
     {
-        return verror("cast.float(str): Expected 1 argument (str) string.\n");
+        return verror("cast.float(str): Expected 1 argument (str) string.");
         f = 0;
     }
     return vfloat(f);
@@ -486,7 +486,7 @@ Value *native_cast_int_to_uint(Env *env, int argc, Value **argv)
     }
     else
     {
-        return verror("cast.i2u(int): Expected 1 argument (int) int. Got %s\n", MILA_GET_TYPENAME(argv[0]));
+        return verror("cast.i2u(int): Expected 1 argument (int) int. Got %s", MILA_GET_TYPENAME(argv[0]));
     }
 }
 
@@ -499,7 +499,7 @@ Value *native_cast_uint_to_int(Env *env, int argc, Value **argv)
     }
     else
     {
-        return verror("cast.u2i(uint): Expected 1 argument (uint) uint. Got %s\n", MILA_GET_TYPENAME(argv[0]));
+        return verror("cast.u2i(uint): Expected 1 argument (uint) uint. Got %s", MILA_GET_TYPENAME(argv[0]));
     }
 }
 
@@ -512,7 +512,7 @@ Value *native_cast_int_to_float(Env *env, int argc, Value **argv)
     }
     else
     {
-        return verror("cast.i2f(int): Expected 1 argument (int) int. Got %s\n", MILA_GET_TYPENAME(argv[0]));
+        return verror("cast.i2f(int): Expected 1 argument (int) int. Got %s", MILA_GET_TYPENAME(argv[0]));
     }
 }
 
@@ -525,7 +525,7 @@ Value *native_cast_float_to_int(Env *env, int argc, Value **argv)
     }
     else
     {
-        return verror("cast.f2i(float): Expected 1 argument (float) float. Got %s\n", MILA_GET_TYPENAME(argv[0]));
+        return verror("cast.f2i(float): Expected 1 argument (float) float. Got %s", MILA_GET_TYPENAME(argv[0]));
     }
 }
 
@@ -538,7 +538,7 @@ Value *native_cast_string(Env *env, int argc, Value **argv)
     }
     else
     {
-        return verror("cast.string(any): Expected 1 argument (any) any.\n");
+        return verror("cast.string(any): Expected 1 argument (any) any.");
     }
     return vnull();
 }
@@ -548,7 +548,7 @@ Value *native_type_of(Env *env, int argc, Value **argv)
     (void)env;
     if (argc != 1)
     {
-        return verror("typeof(any): Expected 1 argument (any) any.\n");
+        return verror("typeof(any): Expected 1 argument (any) any.");
     }
     if (argv[0]->type_name)
         return vstring_dup(argv[0]->type_name);
@@ -581,7 +581,7 @@ Value *native_open(Env *env, int argc, Value **argv)
     (void)env;
     if (argc != 2 || argv[0]->type != T_STRING || argv[1]->type != T_STRING)
     {
-        return verror("= open(filename, mode) expects 2 string args.\n");
+        return verror("= open(filename, mode) expects 2 string args.");
     }
     char *path = argv[0]->v.s;
     if (!search_path)
@@ -589,7 +589,7 @@ Value *native_open(Env *env, int argc, Value **argv)
         char *path = path_list_find(search_path, argv[0]->v.s);
         if (!path)
         {
-            return verror("= open(filename, mode) did not find the file.\n");
+            return verror("= open(filename, mode) did not find the file.");
         }
     }
     char *res = path_list_find(search_path, path);
@@ -617,7 +617,7 @@ Value *native_fclose(Env *env, int argc, Value **argv)
     (void)env;
     if (argc != 1 || argv[0]->type != T_OPAQUE)
     {
-        return verror("= fclose(file) expects 1 file handle arg.\n");
+        return verror("= fclose(file) expects 1 file handle arg.");
     }
     FILE *f = (FILE *)argv[0]->v.opaque;
     if (f)
@@ -633,7 +633,7 @@ Value *native_fflush(Env *env, int argc, Value **argv)
     (void)env;
     if (argc != 1 || argv[0]->type != T_OPAQUE)
     {
-        return verror("= fflush(file) expects 1 file handle arg.\n");
+        return verror("= fflush(file) expects 1 file handle arg.");
     }
     FILE *f = (FILE *)argv[0]->v.opaque;
     if (f)
@@ -649,12 +649,12 @@ Value *native_fprint(Env *env, int argc, Value **argv)
     (void)env;
     if (argc != 2 || argv[0]->type != T_OPAQUE || argv[1]->type != T_STRING)
     {
-        return verror("= fprint(file, string) expects (handle, string).\n");
+        return verror("= fprint(file, string) expects (handle, string).");
     }
     FILE *f = (FILE *)argv[0]->v.opaque;
     if (!f)
     {
-        return verror("= fprint: file handle is closed or invalid.\n");
+        return verror("= fprint: file handle is closed or invalid.");
     }
     const char *s = argv[1]->v.s;
     size_t written = fwrite(s, 1, strlen(s), f);
@@ -666,12 +666,12 @@ Value *native_fread(Env *env, int argc, Value **argv)
     (void)env;
     if (argc != 2 || argv[0]->type != T_OPAQUE || argv[1]->type != T_INT)
     {
-        return verror("= fread(file, num_bytes) expects (handle, int).\n");
+        return verror("= fread(file, num_bytes) expects (handle, int).");
     }
     FILE *f = (FILE *)argv[0]->v.opaque;
     if (!f)
     {
-        return verror("= fread: file handle is closed or invalid.\n");
+        return verror("= fread: file handle is closed or invalid.");
     }
     long n = argv[1]->v.i;
     if (n <= 0)
@@ -692,12 +692,12 @@ Value *native_fseek(Env *env, int argc, Value **argv)
     (void)env;
     if (argc != 3 || argv[0]->type != T_OPAQUE || argv[1]->type != T_INT || argv[2]->type != T_INT)
     {
-        return verror("= fseek(file, offset, whence) expects (handle, int, int).\n");
+        return verror("= fseek(file, offset, whence) expects (handle, int, int).");
     }
     FILE *f = (FILE *)argv[0]->v.opaque;
     if (!f)
     {
-        return verror("= fseek: file handle is closed or invalid.\n");
+        return verror("= fseek: file handle is closed or invalid.");
     }
     long offset = argv[1]->v.i;
     int whence = (int)argv[2]->v.i;
@@ -711,7 +711,7 @@ Value *native_fseek(Env *env, int argc, Value **argv)
         c_whence = whence;
         break;
     default:
-        return verror("= fseek: invalid whence %d (must be 0-SEEK_SET, 1-SEEK_CUR, or 2-SEEK_END).\n", whence);
+        return verror("= fseek: invalid whence %d (must be 0-SEEK_SET, 1-SEEK_CUR, or 2-SEEK_END).", whence);
     }
 
     int res = fseek(f, offset, c_whence);
@@ -723,12 +723,12 @@ Value *native_ftell(Env *env, int argc, Value **argv)
     (void)env;
     if (argc != 1 || argv[0]->type != T_OPAQUE)
     {
-        return verror("= ftell(file) expects 1 file handle arg.\n");
+        return verror("= ftell(file) expects 1 file handle arg.");
     }
     FILE *f = (FILE *)argv[0]->v.opaque;
     if (!f)
     {
-        return verror("ftell: file handle is closed or invalid.\n");
+        return verror("ftell: file handle is closed or invalid.");
     }
     long pos = ftell(f);
     return vint(pos);
@@ -937,17 +937,17 @@ Value *native_new_array(Env *env, int argc, Value **argv)
     (void)env;
     if (argc != 1)
     {
-        return verror("array(size): Requires one argument, array size (int)\n");
+        return verror("array(size): Requires one argument, array size (int)");
     }
     if (!match_types(argv, T_INT, T_ARG_END))
     {
-        return verror("array(size): Expected the argument type int\n");
+        return verror("array(size): Expected the argument type int");
     }
 
     int size = (int)argv[0]->v.i;
     if (size < 0)
     {
-        return verror("array(size): negative size\n");
+        return verror("array(size): negative size");
     }
 
     Value *res = val_new(T_OPAQUE);
@@ -1239,7 +1239,7 @@ Value *native_get_time(Env *env, int argc, Value **argv)
     (void)env;
     if (argc != 0)
     {
-        return verror("invalid number of arguments given.\n");
+        return verror("invalid number of arguments given.");
     }
     return vfloat(get_unix_timestamp());
 }
@@ -1708,6 +1708,70 @@ Value* native_as_opaque(Env* e, int argc, Value** argv) {
     return verror("Unsupported type %s!", MILA_GET_TYPENAME(argv[0]));
 }
 
+typedef struct {
+    char* format;
+    char type;
+    int width;
+    char* length_mod;
+} FormatSpec;
+
+extern Value* vint(long val);
+extern Value* vuint(unsigned long val);
+extern Value* vfloat(double val);
+extern Value* vstring_dup(const char* str);
+
+Value* handle_pointer(void* ptr, const char* spec) {
+    if (!ptr || !spec) {
+        return verror("Something went wrong!");
+    }
+
+    if (strcmp(spec, "string") == 0) {
+        return vstring_dup(ptr);
+    }
+    if (strcmp(spec, "owned_string") == 0) {
+        return vstring_take(ptr);
+    }
+    if (strcmp(spec, "long") == 0) {
+        return vint(*(long*)ptr);
+    }
+    if (strcmp(spec, "long") == 0) {
+        return vuint(*(unsigned long*)ptr);
+    }
+    if (strcmp(spec, "int") == 0) {
+        return vint(*(int*)ptr);
+    }
+    if (strcmp(spec, "float") == 0) {
+        return vint(*(float*)ptr);
+    }
+    if (strcmp(spec, "double") == 0) {
+        return vint(*(double*)ptr);
+    }
+    if (strcmp(spec, "char") == 0) {
+        return vint(*(char*)ptr);
+    }
+    return vnull();
+}
+
+void format_spec_free(FormatSpec* spec) {
+    if (!spec) {
+        return;
+    }
+
+    free(spec->format);
+    spec->format = NULL;
+    free(spec->length_mod);
+    spec->length_mod = NULL;
+    free(spec);
+}
+
+Value* native_from_opaque(Env* e, int argc, Value** argv) {
+    (void)e;
+    if (argc != 2) return verror("from_opaque(str, v): Must have one argument!");
+    
+    Value* res = handle_pointer(GET_OPAQUE(argv[1]), GET_STRING(argv[0]));
+    return res ? res : vnull();
+}
+
 // supports all C format specifiers (well at faking it well)
 Value* native_printf(Env* e, int argc, Value** argv)
 {
@@ -2013,6 +2077,7 @@ void env_register_builtins(Env *g)
     // === Misc
     env_register_native(g, "range", native_range);
     env_register_native(g, "as_opaque", native_as_opaque);
+    env_register_native(g, "from_opaque", native_from_opaque);
     env_register_native(g, "dump_vars", native_meep);
     env_register_native(g, "own", native_own);
     env_register_native(g, "unown", native_unown);

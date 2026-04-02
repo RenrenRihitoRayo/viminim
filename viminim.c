@@ -4,6 +4,7 @@
 #define ML_LIB
 #include "mila/mila.c"
 #include "vcommons_mila.c"
+#include "viminim/event_handler.c"
 
 #include "vcommons.h"
 #include "parsers/c.c"
@@ -683,6 +684,8 @@ void push_message_log(Editor *e, char *msg, MessageSeverity level)
 void draw(Editor *e)
 {
     Buffer *b = e->buffers[e->current];
+    if (strcmp(b->name, "*") == 0) b->changed = 0;
+    if (b->name[0] == '[' && b->name[strlen(b->name)-1] == ']') b->changed = 0;
     int max_rows = LINES - 1;
     int max_cols = COLS;
 
@@ -977,7 +980,7 @@ void editor_command(Editor *e, char* cmd)
             line = b->line_count - 1;
         move_cursor_to(e, line, 0);
     }
-    else if (strcmp(command[0], "new") == 0)
+    else if (strcmp(command[0], "new") == 0 || strcmp(command[0], "n") == 0)
     {
         Buffer *b = create_file_buffer(argc == 2 ? command[1] : "");
         int id = editor_add_buffer(e, b);
@@ -1036,6 +1039,31 @@ void editor_command(Editor *e, char* cmd)
         if (run_file(command[1], mila_globals) > 1) {
             editor_free(editor);
             exit(1);
+        }
+    }
+    else if (strcmp(command[0], "t") == 0 && argc >= 1)
+    {
+        for (int i=1; i<argc; ++i)
+            push_message(e, command[i]);
+    }
+    else if (strcmp(command[0], "r") == 0 && argc == 1)
+    {
+        char* text = linearize(b->lines, b->line_count);
+        Value* res = eval_str(text, mila_globals);
+        if (IS_ERROR(res)) {
+            push_message_log(e, res->v.message, ERROR);
+        }
+        val_release(res);
+        free(text);
+    }
+    else if (argc >= 1) { // treat it as a call to a MiLa function
+        Value* fn = env_get(mila_globals, command[0]);
+        if (MILA_GET_TYPE(fn) == T_FUNCTION || MILA_GET_TYPE(fn) == T_NATIVE) {
+            Value** args = (Value**)malloc(sizeof(Value*) * argc-1);
+            for (int i=1; i<argc; ++i) args[i-1] = vstring_dup(command[i]);
+            Value* res = call_function(fn, mila_globals, argc-1, args);
+            val_release(res);
+            for (int i=0; i<argc-1; ++i) val_release(args[i]);
         }
     }
 
@@ -1322,9 +1350,38 @@ void handle_input(Editor *e, int ch)
     }
 }
 
+char* linearize(char** lines, size_t count)
+{
+    if (count == 0 || lines == NULL)
+        return NULL;
+    size_t total_size = 0;
+    for (size_t i = 0; i < count; i++)
+        if (lines[i] != NULL)
+            total_size += strlen(lines[i]);
+    total_size += count - 1;    
+    total_size += 1;
+    char* result = (char*)malloc(total_size);
+    if (result == NULL)
+        return NULL; 
+    char* current = result;
+    for (size_t i = 0; i < count; i++)
+    {
+        if (lines[i] != NULL)
+        {
+            size_t len = strlen(lines[i]);
+            memcpy(current, lines[i], len);
+            current += len;
+        }
+        if (i < count - 1)
+            *current++ = '\n';
+    }
+    *current = '\0';
+    return result;
+}
+
 int main(int argc, char *argv[])
 {
-
+    event_handler = event_handler_init(16);
     initscr();
     raw();
     noecho();
@@ -1336,7 +1393,7 @@ int main(int argc, char *argv[])
         editor_add_buffer(editor, create_file_buffer(argv[i]));
     if (argc == 1)
     {
-        editor_add_buffer(editor, create_file_buffer("temp"));
+        editor_add_buffer(editor, create_file_buffer("*"));
     }
     env_set_local_raw(mila_globals, "editor", vopaque(editor));
     register_editor_bindings(mila_globals);
@@ -1345,6 +1402,7 @@ int main(int argc, char *argv[])
     if (run_file(init_path, mila_globals) > 1) {
         editor_free(editor);
         free(init_path);
+        event_handler_destroy(event_handler);
         return 1;
     }
     free(init_path);
@@ -1373,8 +1431,7 @@ int main(int argc, char *argv[])
     {
         draw(editor);
         ch = getch();
+        event_call(event_handler, ev_keypress, &ch);
         handle_input(editor, ch);
     }
-
-    return 0;
 }

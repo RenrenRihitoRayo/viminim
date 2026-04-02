@@ -1,0 +1,10 @@
+
+subscribe(EVENT_KEYPRESS, fn(event,key){
+    var key = from_opaque("char", key);
+    push_message(editor, cast.string(key));
+});
+
+var ptr = as_opaque(90);
+var num = from_opaque("long", ptr);
+
+push_message(editor, "num: " + num);
