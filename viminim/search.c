@@ -1,6 +1,6 @@
 #include "../vcommons.h"
 
-int match_range(const char **pat, char c) {
+int vmm_match_range(const char **pat, char c) {
     int negate = 0;
     if (**pat == '!') {
         negate = 1;
@@ -23,13 +23,13 @@ int match_range(const char **pat, char c) {
     return negate ? !matched : matched;
 }
 
-int match(const char *pattern, const char *str) {
+int vmm_match(const char *pattern, const char *str) {
     while (*pattern) {
         if (*pattern == '*') {
             pattern++;
             if (!*pattern) return 1;
             while (*str) {
-                if (match(pattern, str)) return 1;
+                if (vmm_match(pattern, str)) return 1;
                 str++;
             }
             return 0;
@@ -39,7 +39,7 @@ int match(const char *pattern, const char *str) {
             str++;
         } else if (*pattern == '[') {
             pattern++;
-            if (!*str || !match_range(&pattern, *str)) return 0;
+            if (!*str || !vmm_match_range(&pattern, *str)) return 0;
             str++;
         } else {
             if (*pattern != *str) return 0;
@@ -72,7 +72,7 @@ void handle_search(Editor *s)
     if (s->search_d) {
         // search UP (reverse)
         for (ssize_t i = (ssize_t)total - 1; i >= 0; i--) {
-            if (match(pattern, lines[i])) {
+            if (vmm_match(pattern, lines[i])) {
                 if (!s->cur_match) s->cur_match;
                 if (count + 1 >= capacity) {
                     capacity *= 2;
@@ -85,7 +85,7 @@ void handle_search(Editor *s)
     } else {
         // search DOWN (normal)
         for (size_t i = 0; i < total; i++) {
-            if (match(pattern, lines[i])) {
+            if (vmm_match(pattern, lines[i])) {
                 if (!s->cur_match) s->cur_match;
                 if (count + 1 >= capacity) {
                     capacity *= 2;

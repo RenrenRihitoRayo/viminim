@@ -1,7 +1,10 @@
-#include <complex.h>
-#include <ncurses.h>
-#include <stdio.h>
-#include <string.h>
+#include <stdlib.h>
+
+#include "mila/mila.h"
+#define ML_LIB
+#include "mila/mila.c"
+#include "vcommons_mila.c"
+
 #include "vcommons.h"
 #include "parsers/c.c"
 #include "parsers/mila.c"
@@ -90,6 +93,15 @@ void rehighlight_from(Buffer *b, size_t row)
     }
 }
 
+void remove_buffer(Editor* e, int id) {
+    buffer_free(e->buffers[id]);
+    e->count--;
+    for (int i=id; i<e->count; ++i)
+    {
+        e->buffers[i] = e->buffers[i+1];
+    }
+}
+
 void move_cursor_to(Editor *e, size_t new_cy, size_t new_cx)
 {
     Buffer *b = e->buffers[e->current];
@@ -154,6 +166,17 @@ Buffer *buffer_create(const char *name)
     return b;
 }
 
+void buffer_free(Buffer* b)
+{
+    for (size_t line = 0; line < b->line_count; ++line)
+        free(b->lines[line]);
+    free(b->lines);
+    free(b->colors);
+    free(b->line_states);
+    free(b->name);
+    free(b);
+}
+
 Editor *editor_create()
 {
     Editor *e = malloc(sizeof(Editor));
@@ -175,6 +198,19 @@ Editor *editor_create()
     e->cur_match = 0;
     e->search_d = 0; //forward
     return e;
+}
+
+void editor_free(Editor* e)
+{
+    for (int i=0; i<e->count; ++e)
+        buffer_free(e->buffers[i]);
+    free(e->buffers);
+    while (e->message_ptr)
+    {
+        Message m = get_message(e);
+        free(m.message);
+    }
+    free(e);
 }
 
 Buffer *create_file_buffer(const char *filename)
@@ -387,13 +423,151 @@ void backspace_char(Editor *e)
         b->line_states[b->line_count - 1] = HL_STATE_NORMAL;
         b->line_count--;
 
-        erase();
-        draw(e);
-
         e->cy--;
         e->cx = prev_len;
         b->changed = true;
     }
+
+    erase();
+    draw(e);
+}
+
+void insert_line(Buffer *b, size_t line_num, char *line)
+{
+    if (!line)
+        return;
+
+    // If lines array doesn't exist, allocate it
+    if (!b->lines)
+    {
+        b->capacity = 100;
+        b->lines = malloc(sizeof(char *) * b->capacity);
+        b->colors = calloc(b->capacity, sizeof(ColorSpan *));
+        b->line_states = calloc(b->capacity, sizeof(HLState));
+        b->line_count = 0;
+    }
+
+    if (line_num > b->line_count)
+        line_num = b->line_count;
+
+    // Count how many lines we need to insert (split by newlines)
+    int line_count_to_insert = 1;
+    for (const char *p = line; *p; p++)
+    {
+        if (*p == '\n')
+            line_count_to_insert++;
+    }
+
+    // Ensure we have enough capacity for all new lines
+    while (b->line_count + line_count_to_insert > b->capacity)
+    {
+        size_t old = b->capacity;
+        b->capacity *= 2;
+        b->lines = realloc(b->lines, sizeof(char *) * b->capacity);
+        b->colors = realloc(b->colors, sizeof(ColorSpan *) * b->capacity);
+        b->line_states = realloc(b->line_states, sizeof(HLState) * b->capacity);
+        memset(b->colors + old, 0, sizeof(ColorSpan *) * (b->capacity - old));
+        memset(b->line_states + old, 0, sizeof(HLState) * (b->capacity - old));
+    }
+
+    // Shift lines down from line_num onwards to make room for new lines
+    for (int i = (int)b->line_count + line_count_to_insert - 1; i >= (int)(line_num + line_count_to_insert); i--)
+    {
+        b->lines[i] = b->lines[i - line_count_to_insert];
+        b->colors[i] = b->colors[i - line_count_to_insert];
+        b->line_states[i] = b->line_states[i - line_count_to_insert];
+    }
+
+    // Split the input string by newlines and insert each piece
+    const char *start = line;
+    const char *end;
+    size_t insert_pos = line_num;
+
+    while ((end = strchr(start, '\n')) != NULL)
+    {
+        size_t len = end - start;
+        char *new_line = malloc(len + 1);
+        if (!new_line)
+            return;
+
+        memcpy(new_line, start, len);
+        new_line[len] = '\0';
+
+        b->lines[insert_pos] = new_line;
+        b->colors[insert_pos] = NULL;
+        b->line_states[insert_pos] = HL_STATE_NORMAL;
+        insert_pos++;
+
+        start = end + 1;
+    }
+
+    // Insert the last piece (after the final newline or if there are no newlines)
+    if (*start || start == line)
+    {
+        b->lines[insert_pos] = strdup(start);
+        b->colors[insert_pos] = NULL;
+        b->line_states[insert_pos] = HL_STATE_NORMAL;
+    }
+
+    b->line_count += line_count_to_insert;
+
+    // Rehighlight from the inserted section onwards
+    rehighlight_from(b, line_num);
+    b->changed = true;
+}
+
+void set_line(Buffer* b, size_t line_num, char* line)
+{
+    b->changed = 1;
+    if (line_num > 0 && line_num < b->line_count) return;
+    free(b->lines[line_num]);
+    b->lines[line_num] = strdup(line);
+}
+
+char* get_line(Buffer* b, size_t line_num)
+{
+    if (line_num > 0 && line_num < b->line_count) return NULL;
+    return b->lines[line_num];
+}
+
+void delete_line(Buffer *b, int line_num)
+{
+    if (line_num < 0 || line_num >= (int)b->line_count)
+        return;
+
+    // If it's the last line, just clear it
+    if (b->line_count == 1)
+    {
+        free(b->lines[0]);
+        b->lines[0] = strdup("");
+        free(b->colors[0]);
+        b->colors[0] = NULL;
+        b->line_states[0] = HL_STATE_NORMAL;
+        b->changed = true;
+        return;
+    }
+
+    // Free the line being deleted
+    free(b->lines[line_num]);
+    free(b->colors[line_num]);
+
+    // Shift lines up from line_num onwards
+    for (int i = line_num; i < (int)b->line_count - 1; i++)
+    {
+        b->lines[i] = b->lines[i + 1];
+        b->colors[i] = b->colors[i + 1];
+        b->line_states[i] = b->line_states[i + 1];
+    }
+
+    b->line_count--;
+    b->lines[b->line_count] = NULL;
+    b->colors[b->line_count] = NULL;
+
+    // Rehighlight from the deletion point onwards
+    if (line_num < (int)b->line_count)
+        rehighlight_from(b, line_num);
+
+    b->changed = true;
 }
 
 void draw_line_with_highlights(int y, char *line, ColorSpan *spans,
@@ -571,13 +745,15 @@ void draw(Editor *e)
     {
         move(LINES - 2, 0);
         clrtoeol();
-        int chars = snprintf(NULL, 0, "%s '%s' %zuL",
+        int chars = snprintf(NULL, 0, "%s '%s%s' %zuL",
                              e->mode == INSERT ? "INSERT" : "NORMAL",
+                             b->changed ? "*" : "",
                              b->name, b->line_count);
         int offset = snprintf(NULL, 0, "%s %zu, %zu  ",
                               b->syntax ? b->syntax : "???", e->cy + 1, e->cx);
-        mvprintw(LINES - 2, 0, "%s '%s' %zuL%*s %zu, %zi",
+        mvprintw(LINES - 2, 0, "%s '%s%s' %zuL%*s %zu, %zi",
                  e->mode == INSERT ? "INSERT" : "NORMAL",
+                 b->changed ? "*" : "",
                  b->name, b->line_count,
                  COLS - (chars + offset), b->syntax ? b->syntax : "???",
                  e->cy + 1, e->cx);
@@ -588,13 +764,13 @@ void draw(Editor *e)
     {
         move(LINES - 2, 0);
         clrtoeol();
-        int chars = snprintf(NULL, 0, "[%s] %sv%zuL",
-                             "SEARCH",
+        int chars = snprintf(NULL, 0, "SEARCH '%s%s' %zuL",
+                             b->changed ? "*" : "",
                              b->name, b->line_count);
         int offset = snprintf(NULL, 0, "%s %zu, %zu  ",
                               b->syntax ? b->syntax : "???", e->cy + 1, e->cx);
-        mvprintw(LINES - 2, 0, "[%s] %s %zuL%*s %zu, %zi",
-                 "SEARCH",
+        mvprintw(LINES - 2, 0, "SEARCH '%s%s' %zuL%*s %zu, %zi",
+                 b->changed ? "*" : "",
                  b->name, b->line_count,
                  COLS - (chars + offset), b->syntax ? b->syntax : "???",
                  e->cy + 1, e->cx);
@@ -611,14 +787,14 @@ void draw(Editor *e)
     {
         move(LINES - 2, 0);
         clrtoeol();
-        int chars = snprintf(NULL, 0, "%s '%s'",
-                             "BUFFER",
-                             b->name);
+        int chars = snprintf(NULL, 0, "BUFFER '%s%s' %zuL",
+                             b->changed ? "*" : "",
+                             b->name, b->line_count);
         int offset = snprintf(NULL, 0, "%s %zu, %zu  ",
                               b->syntax ? b->syntax : "???", e->cy + 1, e->cx);
-        mvprintw(LINES - 2, 0, "%s '%s'%*s %zu, %zi",
-                 "BUFFER",
-                 b->name,
+        mvprintw(LINES - 2, 0, "BUFFER '%s%s' %zuL%*s %zu, %zi",
+                 b->changed ? "*" : "",
+                 b->name, b->line_count,
                  COLS - (chars + offset), b->syntax ? b->syntax : "???",
                  e->cy + 1, e->cx);
 
@@ -632,13 +808,15 @@ void draw(Editor *e)
     else
     {
         // Normal mode status bar
-        int chars = snprintf(NULL, 0, "%s '%s' %zuL",
+        int chars = snprintf(NULL, 0, "%s '%s%s' %zuL",
                              e->mode == INSERT ? "INSERT" : "NORMAL",
+                             b->changed ? "*" : "",
                              b->name, b->line_count);
         int offset = snprintf(NULL, 0, "%s %zu, %zu  ",
                               b->syntax ? b->syntax : "???", e->cy + 1, e->cx);
-        mvprintw(LINES - 1, 0, "%s '%s' %zuL%*s %zu, %zi",
+        mvprintw(LINES - 1, 0, "%s '%s%s' %zuL%*s %zu, %zi",
                  e->mode == INSERT ? "INSERT" : "NORMAL",
+                 b->changed ? "*" : "",
                  b->name, b->line_count,
                  COLS - (chars + offset), b->syntax ? b->syntax : "???",
                  e->cy + 1, e->cx);
@@ -681,6 +859,11 @@ void draw(Editor *e)
 
 void save_buffer(Buffer *b)
 {
+    if (!b->changed)
+    {
+        push_message_log(b->editor, "Buffer unchanged!", WARNING);
+        return;
+    }
     if ((!b->name) || (!strlen(b->name)))
     {
         push_message_log(b->editor, "Buffer Unnamed!", ERROR);
@@ -701,17 +884,9 @@ void save_buffer(Buffer *b)
     b->changed = false;
 }
 
-void handle_command(Editor *e)
+void editor_command(Editor *e, char* cmd)
 {
-    Buffer *b = e->buffers[e->current];
-    char cmd[256];
-    strcpy(cmd, e->command);
-    if (strlen(cmd) == 0)
-    {
-        e->mode = NORMAL;
-        erase();
-        return;
-    }
+    Buffer* b = e->buffers[e->current];
     bool force = false;
     size_t len = strlen(cmd);
     if (len > 0 && cmd[len - 1] == '!')
@@ -754,7 +929,9 @@ void handle_command(Editor *e)
             exit(0);
         }
         else
-            push_message_log(e, "Unsaved changes!", ERROR);
+        {
+            push_message_log(e, "Unsaved Buffers!", ERROR);
+        }
     }
     else if (strcmp(command[0], "syn") == 0 && argc == 2)
     {
@@ -806,6 +983,31 @@ void handle_command(Editor *e)
         int id = editor_add_buffer(e, b);
         e->current = id;
     }
+    else if (strcmp(command[0], "close") == 0 && (argc == 1 || argc == 2))
+    {
+        int id = argc == 2 ? atoi(command[1]) : e->current;
+        if (id == e->current && e->count == 1) // closed remaing buffer
+        {
+            if (e->buffers[0]->changed && !force) {
+                push_message_log(e, "Buffer unsaved!", WARNING);
+                goto command_clean;
+            }
+            endwin();
+            exit(0);
+        }
+        if (!(id > 0 && id < e->count))
+        {
+            push_message_log(e, "No such buffer to remove!", ERROR);
+            goto command_clean;
+        }
+        if (e->buffers[id]->changed && !force)
+        {
+            push_message_log(e, "Buffer unsaved!", WARNING);
+            goto command_clean;
+        }
+        if (e->current == id && e->current > 0) e->current--;
+        remove_buffer(e, id);
+    }
     else if (strcmp(command[0], "name") == 0 && argc == 2)
     {
         if (b->name)
@@ -829,11 +1031,46 @@ void handle_command(Editor *e)
             level = IMPORTANT_ERROR;
         push_message_log(e, command[2], level);
     }
+    else if (strcmp(command[0], "source") == 0 && argc == 2)
+    {
+        if (run_file(command[1], mila_globals) > 1) {
+            editor_free(editor);
+            exit(1);
+        }
+    }
 
+command_clean:;
     e->cmd_len = 0;
     e->command[0] = '\0';
     e->mode = NORMAL;
     free_command(command_struct);
+}
+
+void handle_command(Editor *e)
+{
+    Buffer *b = e->buffers[e->current];
+    char cmd[1024];
+    strcpy(cmd, e->command);
+    if (strlen(cmd) == 0)
+    {
+        e->mode = NORMAL;
+        erase();
+        return;
+    }
+    
+    if (cmd[0] == '.')
+    {
+        def_prog_mode();
+        endwin();
+        Value* res = eval_str(cmd+1, mila_globals);
+        if (IS_ERROR(res)) print_value_debug(res);
+        val_release(res);
+        getch();
+        reset_prog_mode();
+        refresh();
+    }
+
+    editor_command(e, cmd);
     erase();
 }
 
@@ -849,6 +1086,10 @@ void handle_buffer_switch(Editor *e)
     if (id != -1 && id < e->count)
     {
         e->current = id;
+        erase();
+        e->cmd_len = 0;
+        e->command[0] = '\0';
+        e->mode = NORMAL;
         return;
     }
 
@@ -956,15 +1197,6 @@ void handle_input(Editor *e, int ch)
                     e->cy = e->matched_lines[e->cur_match] - 1;
                     move_cursor_to(e, e->cy, e->cx);
                 }
-                break;
-            case 'Z':
-                erase();
-                for (int i = 0; e->matched_lines[i]; ++i)
-                {
-                    mvprintw(i + 1, 1, "%i", e->matched_lines[i] - 1);
-                }
-                refresh();
-                getch();
                 break;
             case ':':
                 e->mode = COMMAND;
@@ -1092,10 +1324,30 @@ void handle_input(Editor *e, int ch)
 
 int main(int argc, char *argv[])
 {
+
     initscr();
     raw();
     noecho();
     keypad(stdscr, TRUE);
+
+    mila_globals = mila_init();
+    editor = editor_create();
+    for (int i = 1; i < argc; ++i)
+        editor_add_buffer(editor, create_file_buffer(argv[i]));
+    if (argc == 1)
+    {
+        editor_add_buffer(editor, create_file_buffer("temp"));
+    }
+    env_set_local_raw(mila_globals, "editor", vopaque(editor));
+    register_editor_bindings(mila_globals);
+
+    char* init_path = home("~/.vmmrc.mila");
+    if (run_file(init_path, mila_globals) > 1) {
+        editor_free(editor);
+        free(init_path);
+        return 1;
+    }
+    free(init_path);
 
     set_escdelay(0);
 
@@ -1114,22 +1366,15 @@ int main(int argc, char *argv[])
     init_pair(7, COLOR_BLACK, COLOR_RED);
     init_color(8, 100, 602, 602);
     init_pair(8, 8, 9);
-    Editor *ed = editor_create();
-    for (int i = 1; i < argc; ++i)
-        editor_add_buffer(ed, create_file_buffer(argv[i]));
-    if (argc == 1)
-    {
-        editor_add_buffer(ed, create_file_buffer("temp"));
-    }
+
     erase();
     int ch;
     while (1)
     {
-        draw(ed);
+        draw(editor);
         ch = getch();
-        handle_input(ed, ch);
+        handle_input(editor, ch);
     }
 
-    endwin();
     return 0;
 }

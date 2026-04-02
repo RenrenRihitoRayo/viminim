@@ -1,0 +1,23 @@
+push_message(editor, ".vmmrc.mila loaded!");
+
+// Create the buffer
+var id = new_buffer(editor, "Welcoming Buffer :D");
+// Get the buffer we just made
+var cur = get_buffer(editor, id);
+// Set current buffer to the one we made
+set_buffer(editor, id);
+// Insert some lines (this is valid multiline string syntax)
+insert_line(cur, 0, "
+Welcome to vmm!
+A simple but modern copy of vi.");
+// Tell vmm this buffer is unchanged, so user can exit without hassle
+
+// Still a full blown language
+// Not some cheap markup language
+var current_cy = 4;
+foreach item : range(10) {
+	insert_line(cur, current_cy, "This is copy #" + item);
+	set current_cy += 1;
+}
+
+set_buffer_status(cur, STATUS_CHANGED, false);

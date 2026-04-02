@@ -4,6 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <ncurses.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #define SEARCH_BUFFER_SIZE 256
 
@@ -125,6 +130,10 @@ struct Editor {
     bool     search_d;
 };
 
+Editor* editor = NULL;
+Env* mila_globals = NULL;
+
+void buffer_free(Buffer* b);
 SyntaxHL find_syntax_w_name(const char* name);
 SyntaxHL find_syntax_w_ext(const char* name);
 void rehighlight(Buffer *b);
@@ -140,3 +149,40 @@ void handle_command(Editor *e);
 void handle_input(Editor *e, int ch);
 Message get_message(Editor* e);
 void push_message(Editor* e, char* msg);
+void push_message_log(Editor* e, char* msg, MessageSeverity level);
+void insert_line(Buffer *b, size_t line_num, char *line);
+void delete_line(Buffer *b, int line_num);
+void set_line(Buffer *b, size_t line_num, char* line);
+char* get_line(Buffer *b, size_t line_num);
+Buffer *create_file_buffer(const char *filename);
+void editor_command(Editor *e, char* cmd);
+
+char* home(const char *path) {
+    if (!path || path[0] != '~') {
+        return strdup(path);
+    }
+    const char *home = NULL;
+#ifdef _WIN32
+    home = getenv("USERPROFILE");
+    if (!home) {  // fallback
+        char *drive = getenv("HOMEDRIVE");
+        char *dir = getenv("HOMEPATH");
+        if (drive && dir) {
+            static char buf[1024];
+            snprintf(buf, sizeof(buf), "%s%s", drive, dir);
+            home = buf;
+        }
+    }
+#else
+    home = getenv("HOME");
+#endif
+    if (!home) {
+        fprintf(stderr, "Cannot determine home directory\n");
+        return NULL;
+    }
+    size_t len = strlen(home) + strlen(path);
+    char *result = (char*)malloc(len);
+    if (!result) return NULL;
+    snprintf(result, len, "%s%s", home, path+1);
+    return result;
+}
