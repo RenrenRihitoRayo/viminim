@@ -1,6 +1,9 @@
 #include <stdlib.h>
+#include <string.h>
 
 #include "mila/mila.h"
+#include "mila/ml_builtins.c"
+#include "mila/ml_paths.c"
 #define ML_LIB
 #include "mila/mila.c"
 #include "vcommons_mila.c"
@@ -16,7 +19,8 @@ HLList hl_list[] = {
     {"c", (char *[]){"c", "h", "i", NULL}, highlight_c_line},
     {"mila", (char *[]){"mila", NULL}, highlight_mila_line},
     {"plain", (char *[]){"txt", NULL}, NULL},
-    {NULL, NULL, NULL}};
+    {NULL, NULL, NULL}
+};
 
 SyntaxHL find_syntax_w_name(const char *name)
 {
@@ -171,6 +175,7 @@ void buffer_free(Buffer* b)
 {
     for (size_t line = 0; line < b->line_count; ++line)
         free(b->lines[line]);
+    free(b->syntax);
     free(b->lines);
     free(b->colors);
     free(b->line_states);
@@ -520,7 +525,7 @@ void insert_line(Buffer *b, size_t line_num, char *line)
 void set_line(Buffer* b, size_t line_num, char* line)
 {
     b->changed = 1;
-    if (line_num > 0 && line_num < b->line_count) return;
+    if (!(line_num >= 0 && line_num < b->line_count)) return;
     free(b->lines[line_num]);
     b->lines[line_num] = strdup(line);
 }
@@ -535,6 +540,8 @@ void delete_line(Buffer *b, int line_num)
 {
     if (line_num < 0 || line_num >= (int)b->line_count)
         return;
+
+    if (b->editor->cy >= line_num) b->editor->cy--;
 
     // If it's the last line, just clear it
     if (b->line_count == 1)
@@ -982,9 +989,11 @@ void editor_command(Editor *e, char* cmd)
     }
     else if (strcmp(command[0], "new") == 0 || strcmp(command[0], "n") == 0)
     {
-        Buffer *b = create_file_buffer(argc == 2 ? command[1] : "");
+        Buffer *b = create_file_buffer(argc == 2 ? command[1] : "[unnamed]");
         int id = editor_add_buffer(e, b);
         e->current = id;
+        move_cursor_to(e, 0, 0);
+        erase(); draw(e);
     }
     else if (strcmp(command[0], "close") == 0 && (argc == 1 || argc == 2))
     {
@@ -1009,10 +1018,19 @@ void editor_command(Editor *e, char* cmd)
             goto command_clean;
         }
         if (e->current == id && e->current > 0) e->current--;
+        move_cursor_to(e, 0, 0);
         remove_buffer(e, id);
     }
     else if (strcmp(command[0], "name") == 0 && argc == 2)
     {
+        if ((!(strcmp(b->name, "*") == 0 || (b->name[0] == '[' && b->name[strlen(b->name)-1] == ']'))) && !force)
+        {
+            char* txt = NULL;
+            our_asprintf(&txt, "Try `%s!`\nBuffer has a name!", cmd);
+            push_message_log(e, txt, WARNING);
+            free(txt);
+            goto command_clean;
+        }
         if (b->name)
             free(b->name);
         b->name = strdup(command[1]);
@@ -1056,6 +1074,22 @@ void editor_command(Editor *e, char* cmd)
         val_release(res);
         free(text);
     }
+    else if (strcmp(command[0], "rcon") == 0 && argc == 1)
+    {
+        
+        char* text = linearize(b->lines, b->line_count);
+        def_prog_mode();
+        endwin();
+        Value* res = eval_str(text, mila_globals);
+        if (IS_ERROR(res)) {
+            push_message_log(e, res->v.message, ERROR);
+        }
+        getch();
+        reset_prog_mode();
+        refresh();
+        val_release(res);
+        free(text);
+    }
     else if (argc >= 1) { // treat it as a call to a MiLa function
         Value* fn = env_get(mila_globals, command[0]);
         if (MILA_GET_TYPE(fn) == T_FUNCTION || MILA_GET_TYPE(fn) == T_NATIVE) {
@@ -1077,7 +1111,7 @@ command_clean:;
 void handle_command(Editor *e)
 {
     Buffer *b = e->buffers[e->current];
-    char cmd[1024];
+    char cmd[1024] = {0};
     strcpy(cmd, e->command);
     if (strlen(cmd) == 0)
     {
@@ -1113,6 +1147,7 @@ void handle_buffer_switch(Editor *e)
         id = atoi(buffer + 1);
     if (id != -1 && id < e->count)
     {
+        move_cursor_to(e, 0, 0);
         e->current = id;
         erase();
         e->cmd_len = 0;
@@ -1126,6 +1161,7 @@ void handle_buffer_switch(Editor *e)
         if (strcmp(buffer, e->buffers[buf]->name) == 0)
         {
             e->current = buf;
+            move_cursor_to(e, 0, 0);
             goto clean;
         }
     }
@@ -1248,8 +1284,6 @@ void handle_input(Editor *e, int ch)
                 backspace_char(e);
             else if (ch == 127 || ch == KEY_DC)
                 e->cx++, backspace_char(e);
-            else if (ch == '\t')
-                insert_string(e, "    ");
             else
                 insert_char(e, ch);
         }
@@ -1398,11 +1432,52 @@ int main(int argc, char *argv[])
     env_set_local_raw(mila_globals, "editor", vopaque(editor));
     register_editor_bindings(mila_globals);
 
+    char path[MAX_PATH_LENGTH] = {0};
+    path_dirname(argv[0], path, MAX_PATH_LENGTH);
+    push_message(editor, path);
+    char vmm_mila_lib_init[MAX_PATH_LENGTH] = {0};
+    path_join(vmm_mila_lib, MAX_PATH_LENGTH, 2, path, "libs");
+    path_join(vmm_mila_lib_init, MAX_PATH_LENGTH, 3, path, "libs", "init.mila");
+
+    char* lib_init_path = home(vmm_mila_lib_init);
+    if (run_file(lib_init_path, mila_globals) > 1) {
+        editor_free(editor);
+        free(lib_init_path);
+        event_handler_destroy(event_handler);
+        env_free(mila_globals);
+        return 1;
+    }
+    free(lib_init_path);
+    Value* arr = env_get(mila_globals, "_files");
+    if (arr) {
+        if (strcmp(MILA_GET_TYPENAME(arr), "vmm:array") == 0) {
+            Value* iter_obj = array_to_iter(arr);
+            Value** iter = GET_OPAQUE(iter_obj);
+
+            for (int i=0; iter[i]; ++i)
+            {
+                char file[MAX_PATH_LENGTH] = {0};
+                path_join(file, MAX_PATH_LENGTH, 3, path, "libs", GET_OPAQUE(iter[i]));
+                if (run_file(file, mila_globals) > 1) {
+                    editor_free(editor);
+                    event_handler_destroy(event_handler);
+                    env_free(mila_globals);
+                    return 1;
+                }
+                val_release(iter[i]);
+            }
+            val_release(iter_obj);
+        } else {
+            push_message_log(editor, "`_files` in init.mila is not of type vmm:array!", IMPORTANT_ERROR);
+        }
+    }
+
     char* init_path = home("~/.vmmrc.mila");
     if (run_file(init_path, mila_globals) > 1) {
         editor_free(editor);
         free(init_path);
         event_handler_destroy(event_handler);
+        env_free(mila_globals);
         return 1;
     }
     free(init_path);

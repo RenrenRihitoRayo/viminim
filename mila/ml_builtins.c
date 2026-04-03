@@ -46,6 +46,8 @@
 #include <limits.h>
 #endif
 
+#include <time.h>
+
 #define MILA_EDITION 202603
 #define MILA_VERSION 2
 #define MILA_LPREFIX "vmm:"
@@ -2072,6 +2074,29 @@ Value* native_crandom(Env* env, int argc, Value** argv)
     return vint(rand());
 }
 
+Value* native_get_tm_local(Env* env, int argc, Value** argv) {
+    if (argc>1) return verror("get_tm_local(): Expected at most 1 argument!");
+    time_t time = argc == 0 ? get_unix_timestamp() : GET_INTEGER(argv[0]);
+    struct tm* info = localtime(&time);
+    return vopaque(info);
+}
+
+Value* native_get_tm_gmt(Env* env, int argc, Value** argv) {
+    if (argc>1) return verror("get_tm_gmt(): Expected at most 1 argument!");
+    time_t time = argc == 0 ? get_unix_timestamp() : GET_INTEGER(argv[0]);
+    struct tm* info = gmtime(&time);
+    return vopaque(info);
+}
+
+Value* native_strftime(Env* env, int argc, Value** argv) {
+    if (argc!=2) return verror("strftime(fmt, tm): Expected two arguments!");
+    struct tm* info = GET_OPAQUE(argv[1]);
+    char* fmt = GET_STRING(argv[0]);
+    char buffer[100] = {0};
+    strftime(buffer, sizeof(buffer), fmt, info);
+    return vstring_dup(buffer);
+}
+
 void env_register_builtins(Env *g)
 {
     // === Misc
@@ -2232,6 +2257,9 @@ void env_register_builtins(Env *g)
     env_register_native(g, "exit", native_exit);
     // === Time measurement
     env_register_native(g, "get_time", native_get_time);
+    env_register_native(g, "strftime", native_strftime);
+    env_register_native(g, "get_tm_gmt", native_get_tm_gmt);
+    env_register_native(g, "get_tm_local", native_get_tm_local);
     // === OS Stuff
     env_register_native(g, "system", native_system);
     // === Modules

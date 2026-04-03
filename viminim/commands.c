@@ -1,5 +1,4 @@
 #include "../vcommons.h"
-
 #define INITIAL_CAP 16
 
 static void push_token(char ***tokens, int *count, int *cap, char *tok)
@@ -11,10 +10,11 @@ static void push_token(char ***tokens, int *count, int *cap, char *tok)
     (*tokens)[(*count)++] = tok;
 }
 
-static char *substr(const char *src, int start, int len)
+static char *substr(const char *src, size_t start, size_t len)
 {
     char *s = malloc(len + 1);
-    memcpy(s, src + start, len);
+    if (s)
+        memcpy(s, src + start, len);
     s[len] = '\0';
     return s;
 }
@@ -35,7 +35,8 @@ static char translate_escape(char c)
 
 void free_command(Command* cmd)
 {
-    for (int i=0; cmd->command[i]; ++i)
+    if (!cmd) return;
+    for (int i = 0; cmd->command[i]; ++i)
         free(cmd->command[i]);
     free(cmd->command);
     free(cmd);
@@ -43,106 +44,105 @@ void free_command(Command* cmd)
 
 Command *parse_command(const char *input)
 {
-    Command* cmd = (Command*)malloc(sizeof(Command));
+    if (!input) return NULL;
+    
+    Command* cmd = malloc(sizeof(Command));
+    if (!cmd) return NULL;
+    
     int cap = INITIAL_CAP, count = 0;
     char **tokens = malloc(cap * sizeof(char*));
-
-    int i = 0;
-    while (input[i]) {
-        // skip whitespace
-        if (isspace(input[i])) {
+    if (!tokens) {
+        free(cmd);
+        return NULL;
+    }
+    
+    size_t input_len = strlen(input);
+    size_t i = 0;
+    
+    while (i < input_len) {
+        if (isspace((unsigned char)input[i])) {
             i++;
             continue;
         }
-
-        // --- STRING ---
+        
         if (input[i] == '"') {
-            i++; // skip opening quote
-            char *buf = malloc(strlen(input) + 1);
-            int bi = 0;
-
-            while (input[i] && input[i] != '"') {
-                if (input[i] == '\\') {
+            i++;
+            char *buf = malloc(input_len + 1);
+            if (!buf) goto cleanup;
+            
+            size_t bi = 0;
+            while (i < input_len && input[i] != '"') {
+                if (input[i] == '\\' && i + 1 < input_len) {
                     i++;
-                    if (input[i])
-                        buf[bi++] = translate_escape(input[i++]);
+                    buf[bi++] = translate_escape(input[i++]);
                 } else {
                     buf[bi++] = input[i++];
                 }
             }
-
-            if (input[i] == '"') i++; // closing quote
+            if (i < input_len && input[i] == '"') i++;
             buf[bi] = '\0';
-
             push_token(&tokens, &count, &cap, buf);
             continue;
         }
-
-        // --- NUMBER (int or float) ---
-        if (isdigit(input[i]) || (input[i] == '.' && isdigit(input[i+1]))) {
-            int start = i;
+        
+        if (isdigit((unsigned char)input[i]) || 
+            (input[i] == '.' && i + 1 < input_len && isdigit((unsigned char)input[i+1]))) {
+            size_t start = i;
             int has_dot = 0;
-
             if (input[i] == '.') has_dot = 1;
-
-            while (isdigit(input[i]) || input[i] == '.') {
+            
+            while (i < input_len && (isdigit((unsigned char)input[i]) || input[i] == '.')) {
                 if (input[i] == '.') {
                     if (has_dot) break;
                     has_dot = 1;
                 }
                 i++;
             }
-
-            push_token(&tokens, &count, &cap,
-                       substr(input, start, i - start));
+            push_token(&tokens, &count, &cap, substr(input, start, i - start));
             continue;
         }
-
-        // --- OPERATORS (multi-char first) ---
+        
         if (strchr("=!<>+-*/", input[i])) {
-            int start = i;
-
-            // check for 2-char operators
-            if ((input[i] == '=' && input[i+1] == '=') ||
-                (input[i] == '!' && input[i+1] == '=') ||
-                (input[i] == '>' && input[i+1] == '=') ||
-                (input[i] == '<' && input[i+1] == '=') ||
-                (input[i] == '*' && input[i+1] == '*')) {
+            size_t start = i;
+            if ((input[i] == '=' && i + 1 < input_len && input[i+1] == '=') ||
+                (input[i] == '!' && i + 1 < input_len && input[i+1] == '=') ||
+                (input[i] == '>' && i + 1 < input_len && input[i+1] == '=') ||
+                (input[i] == '<' && i + 1 < input_len && input[i+1] == '=') ||
+                (input[i] == '*' && i + 1 < input_len && input[i+1] == '*')) {
                 i += 2;
             } else {
                 i++;
             }
-
-            push_token(&tokens, &count, &cap,
-                       substr(input, start, i - start));
+            push_token(&tokens, &count, &cap, substr(input, start, i - start));
             continue;
         }
-
-        // --- PUNCTUATION ---
+        
         if (strchr("(){}", input[i])) {
-            push_token(&tokens, &count, &cap,
-                       substr(input, i, 1));
+            push_token(&tokens, &count, &cap, substr(input, i, 1));
             i++;
             continue;
         }
-
-        // --- IDENTIFIER / WORD ---
-        if (isalpha(input[i]) || strchr("\\/.[]", input[i])) {
-            int start = i;
-            while (isalnum(input[i]) || strchr("\\/.[]", input[i]))
+        
+        if (isalpha((unsigned char)input[i]) || strchr("\\/.[]", input[i])) {
+            size_t start = i;
+            while (i < input_len && (isalnum((unsigned char)input[i]) || strchr("\\/.[]", input[i])))
                 i++;
-
-            push_token(&tokens, &count, &cap,
-                       substr(input, start, i - start));
+            push_token(&tokens, &count, &cap, substr(input, start, i - start));
             continue;
         }
-
-        // unknown char fallback
+        
         i++;
     }
-
+    
     tokens[count] = NULL;
     cmd->command = tokens;
     cmd->argc = count;
     return cmd;
+
+cleanup:
+    for (int j = 0; j < count; j++)
+        free(tokens[j]);
+    free(tokens);
+    free(cmd);
+    return NULL;
 }

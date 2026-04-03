@@ -4,6 +4,7 @@
 Is a modern subset of Vi.
 
 Current features:
+
 [x] Syntax highlighting (c, and mila)
 [x] Buffers
 [x] Integration with MiLa

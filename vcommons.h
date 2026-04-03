@@ -25,10 +25,10 @@ typedef enum { NORMAL, INSERT, COMMAND, SEARCH, BUFFER_SWITCH } Mode;
 
 typedef enum {
     ev_keypress,
-    ev_read,
-    ev_save,
-    ev_buffer_create,
-    ev_close_buffer,
+    ev_read, // on n and new
+    ev_save, // on w and wq
+    ev_buffer_create, // on n and new
+    ev_close_buffer, // on close, wq, and q
 } Event;
 
 typedef enum {
@@ -150,6 +150,11 @@ struct Editor {
 Editor* editor = NULL;
 Env* mila_globals = NULL;
 EventHandler* event_handler = NULL;
+char vmm_mila_lib[MAX_PATH_LENGTH] = {0};
+
+char* vmm_mila_to_init[] = {
+    "date.mila", NULL
+};
 
 void buffer_free(Buffer* b);
 SyntaxHL find_syntax_w_name(const char* name);
@@ -204,4 +209,13 @@ char* home(const char *path) {
     if (!result) return NULL;
     snprintf(result, len, "%s%s", home, path+1);
     return result;
+}
+
+void type(char* text)
+{
+    int len = strlen(text);
+    for (int c = len - 1; c >= 0; --c)
+    {
+        ungetch(text[c]);
+    }
 }

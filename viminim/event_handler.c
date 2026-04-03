@@ -96,7 +96,10 @@ void event_call(EventHandler* handler, int id, void* data) {
 
     for (size_t i = 0; i < handler->count; i++) {
         if (handler->subscriptions[i].event_id == id) {
-            call_function_with(mila_globals, handler->subscriptions[i].callback, vint(id), vopaque(data), NULL);
+            Value* vid = vint(id);
+            Value* vdata = vopaque(data);
+            Value* res = call_function_with(mila_globals, handler->subscriptions[i].callback, vid, vdata, NULL);
+            val_release(res);
         }
     }
 }

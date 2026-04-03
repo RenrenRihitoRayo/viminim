@@ -1,0 +1,9 @@
+push_message(editor, "Yahoo");
+
+subscribe(EVENT_KEYPRESS, fn(_, key: "opaque:cint") {
+    var key: "int" = from_opaque("int", key);
+    if (get_mode(editor) == INSERT && key == 9)
+    {
+        type("    ");
+    }
+})

@@ -1,0 +1,20 @@
+
+namespace date {
+	fn .get() -> "string" {
+		var tm: "opaque:tm" = get_tm_local();
+		var date: "string" = strftime("%A %Y-%m-%d %I:%M:%S %p", tm);
+		return date;
+	}
+}
+
+subscribe(EVENT_KEYPRESS, fn(_, key: "opaque:int") {
+	var char: "int" = from_opaque("int", key);
+ push_message(editor, cast.string(char));
+ if (get_mode(editor) != INSERT)
+ {
+  return;
+ }
+ if (char == KEY_F1) {
+		type(date.get());
+	}
+})

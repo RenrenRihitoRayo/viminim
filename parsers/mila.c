@@ -170,7 +170,7 @@ static HLState highlight_mila_line(const char *line, HLState entry, ColorSpan **
             }
             spans[ns++] = (ColorSpan){ (size_t)start, (size_t)(i - start), F_RED };
             // If string didn't close, transition to STRING state for next line
-            if (i >= len && (i == len || line[i-1] != '"')) {
+            if (line[len-1] != '"') {
                 state = HL_STATE_STRING;
             }
             continue;
