@@ -1,5 +1,4 @@
 #include "vcommons.h"
-#include "mila/mila.h"
 #include <ncurses.h>
 
 typedef enum {

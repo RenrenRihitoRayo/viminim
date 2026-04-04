@@ -1,10 +1,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "mila/mila.h"
-#include "mila/ml_builtins.c"
-#include "mila/ml_paths.c"
 #define ML_LIB
+#define VMM_BUILD
 #include "mila/mila.c"
 #include "vcommons_mila.c"
 #include "viminim/event_handler.c"
@@ -1415,6 +1413,10 @@ char* linearize(char** lines, size_t count)
 
 int main(int argc, char *argv[])
 {
+    if (argc == 2 && strcmp(argv[1], "-m") == 0) {
+        repr();
+        return 0;
+    }
     event_handler = event_handler_init(16);
     initscr();
     raw();
